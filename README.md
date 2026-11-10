@@ -2,10 +2,10 @@
 **Version / 版本號: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 Dual-Engine & True OLED Black Edition)**
 
 <p align="center">
-  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest"><img src="https://img.shields.io/github/v/release/athurwang2026/gt7-switch-sim-ddu?color=blue&logo=github&label=Release" alt="GitHub Release"></a>
-  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu"><img src="https://img.shields.io/badge/Platform-Nintendo%20Switch%20%7C%20Atmosph%C3%A8re-E60012?logo=nintendoswitch&logoColor=white" alt="Platform"></a>
-  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro"><img src="https://img.shields.io/badge/Download-gt7__switch__hud.nro-success?logo=nintendo&logoColor=white" alt="Direct Download"></a>
-  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu"><img src="https://img.shields.io/badge/OLED-True%20Black%20%23000000-black?logo=color&logoColor=white" alt="True OLED Black"></a>
+  <a href="https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest"><img src="https://img.shields.io/github/v/release/arthurwang2026/gt7-switch-sim-ddu?color=blue&logo=github&label=Release" alt="GitHub Release"></a>
+  <a href="https://github.com/arthurwang2026/gt7-switch-sim-ddu"><img src="https://img.shields.io/badge/Platform-Nintendo%20Switch%20%7C%20Atmosph%C3%A8re-E60012?logo=nintendoswitch&logoColor=white" alt="Platform"></a>
+  <a href="https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro"><img src="https://img.shields.io/badge/Download-gt7__switch__hud.nro-success?logo=nintendo&logoColor=white" alt="Direct Download"></a>
+  <a href="https://github.com/arthurwang2026/gt7-switch-sim-ddu"><img src="https://img.shields.io/badge/OLED-True%20Black%20%23000000-black?logo=color&logoColor=white" alt="True OLED Black"></a>
 </p>
 
 <p align="center">
@@ -183,6 +183,6 @@ Ein natives Homebrew Sim-Racing Dashboard Display Unit (`.nro`) speziell für di
 
 ## 📦 Download & Release (`gt7_switch_hud.nro`)
 
-- 🌐 **GitHub Releases**: [Latest Release (v1.11.06.1220)](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest) • [All Releases](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases)
-- 📦 **Direct .NRO Download**: [gt7_switch_hud.nro (Latest)](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro)
+- 🌐 **GitHub Releases**: [Latest Release (v1.11.06.1220)](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest) • [All Releases](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases)
+- 📦 **Direct .NRO Download**: [gt7_switch_hud.nro (Latest)](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro)
 - 📂 **Install Path on SD Card**: `/switch/gt7_hud/gt7_switch_hud.nro`

@@ -2,9 +2,9 @@
 **Version: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 Dual-Engine & True OLED Black Edition)**
 
 <p align="center">
-  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest"><img src="https://img.shields.io/github/v/release/athurwang2026/gt7-switch-sim-ddu?color=blue&logo=github&label=Release" alt="GitHub Release"></a>
-  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu"><img src="https://img.shields.io/badge/Platform-Nintendo%20Switch%20%7C%20Atmosph%C3%A8re-E60012?logo=nintendoswitch&logoColor=white" alt="Platform"></a>
-  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro"><img src="https://img.shields.io/badge/Download-gt7__switch__hud.nro-success?logo=nintendo&logoColor=white" alt="Direct Download"></a>
+  <a href="https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest"><img src="https://img.shields.io/github/v/release/arthurwang2026/gt7-switch-sim-ddu?color=blue&logo=github&label=Release" alt="GitHub Release"></a>
+  <a href="https://github.com/arthurwang2026/gt7-switch-sim-ddu"><img src="https://img.shields.io/badge/Platform-Nintendo%20Switch%20%7C%20Atmosph%C3%A8re-E60012?logo=nintendoswitch&logoColor=white" alt="Platform"></a>
+  <a href="https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro"><img src="https://img.shields.io/badge/Download-gt7__switch__hud.nro-success?logo=nintendo&logoColor=white" alt="Direct Download"></a>
 </p>
 
 [繁體中文](README_ZH.md) | [日本語](README_JA.md) | [Deutsch](README_DE.md)
@@ -90,7 +90,7 @@ A native Homebrew Sim Racing Dashboard Display Unit (`.nro`) tailored specifical
 
 ## 📦 Installation (Nintendo Switch Atmosphère)
 
-1. Download the latest `gt7_switch_hud.nro` directly from [Latest GitHub Release](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest) or via [Direct Download Link](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro) (browse [All Releases](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases)).
+1. Download the latest `gt7_switch_hud.nro` directly from [Latest GitHub Release](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest) or via [Direct Download Link](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro) (browse [All Releases](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases)).
 2. Insert your Switch microSD card into your computer and copy `gt7_switch_hud.nro` to:
    ```
    /switch/gt7_hud/gt7_switch_hud.nro
