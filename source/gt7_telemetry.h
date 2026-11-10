@@ -52,7 +52,8 @@ typedef enum {
     GT7_FLAG_HIGH_BEAM     = (1 << 8),
     GT7_FLAG_LOW_BEAM      = (1 << 9),
     GT7_FLAG_ASM_ACTIVE    = (1 << 10),
-    GT7_FLAG_TCS_ACTIVE    = (1 << 11)
+    GT7_FLAG_TCS_ACTIVE    = (1 << 11),
+    GT7_FLAG_IN_PIT        = (1 << 14)
 } gt7_flags_t;
 
 typedef struct {
@@ -88,6 +89,7 @@ typedef struct {
     float speed_kmh;         /* Speed in km/h */
     float speed_mph;         /* Speed in mph */
     float session_top_speed_kmh;
+    float session_distance_km; /* Total accumulated distance driven in session (km) */
     uint16_t max_speed_kmh;  /* Car estimated top speed (0x8C) */
 
     /* Official GT7 MFD Interactive Parameters */

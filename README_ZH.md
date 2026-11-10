@@ -1,6 +1,12 @@
 # GT7 & PC SimHub Switch Sim-DDU Pro (繁體中文)
 **版本號: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 雙遙測引擎 & True OLED Black 旗艦版)**
 
+<p align="center">
+  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest"><img src="https://img.shields.io/github/v/release/athurwang2026/gt7-switch-sim-ddu?color=blue&logo=github&label=Release" alt="GitHub Release"></a>
+  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu"><img src="https://img.shields.io/badge/Platform-Nintendo%20Switch%20%7C%20Atmosph%C3%A8re-E60012?logo=nintendoswitch&logoColor=white" alt="Platform"></a>
+  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro"><img src="https://img.shields.io/badge/Download-gt7__switch__hud.nro-success?logo=nintendo&logoColor=white" alt="Direct Download"></a>
+</p>
+
 [English](README_EN.md) | [日本語](README_JA.md) | [Deutsch](README_DE.md)
 
 專為 **Nintendo Switch (V1 / V2 / Switch OLED 大氣層 Atmosphère 破解系統)** 打造的原生 Homebrew 賽車儀表板 App (`.nro`)。透過 Wi-Fi 同時支援接收 **PS5 / PS5 Pro《Gran Turismo 7 (跑車浪漫旅 7)》** 與 **PC SimHub（Assetto Corsa、ACC、iRacing、F1、Forza、rFactor 2、EA WRC 等全平台賽車遊戲）** 60Hz UDP 遙測封包，將 Switch 拆下左右 Joy-Con 搖桿後，直接架設於賽車方向盤基座前方，化身為高精準度、低延遲的頂級 **Sim Racing DDU (Dashboard Display Unit)**。
@@ -88,7 +94,7 @@
 
 ## 📦 安裝說明 (Switch 大氣層 Atmosphère)
 
-1. 前往 [GitHub Releases](https://github.com/d9053326-bot/gt7-switch-sim-ddu/releases) 下載最新版 `gt7_switch_hud.nro`。
+1. 前往 [GitHub Releases 最新發布頁面](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest) 下載最新版 [`gt7_switch_hud.nro`](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro)（或至 [所有版本列表](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases) 下載特定歷史版本）。
 2. 將 Switch 記憶卡插入電腦，將 `gt7_switch_hud.nro` 放入記憶卡路徑：
    ```
    /switch/gt7_hud/gt7_switch_hud.nro

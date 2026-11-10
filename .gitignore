@@ -3,6 +3,8 @@ build_switch/
 *.elf
 *.o
 *.d
+*.nacp
+scratch/
 gt7_switch_hud_sim
 capture_screens
 raw_screens/

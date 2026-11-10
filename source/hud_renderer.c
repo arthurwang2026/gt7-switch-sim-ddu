@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -38,6 +39,37 @@ static void draw_rect(SDL_Renderer *r, int x, int y, int w, int h, int border, r
 static void draw_oled_black_background(SDL_Renderer *r) {
     set_color(r, rgba(0, 0, 0, 255));
     SDL_RenderClear(r);
+}
+
+/* Real-world local dashboard clock & calendar date for luxury digital cockpits */
+static void get_dashboard_clock(char *out_buf, size_t out_sz, bool use_12h) {
+    time_t raw_time = time(NULL);
+    struct tm *ti = localtime(&raw_time);
+    if (!ti) {
+        snprintf(out_buf, out_sz, use_12h ? "12:00 pm" : "12:00");
+        return;
+    }
+    if (use_12h) {
+        int hr12 = ti->tm_hour % 12;
+        if (hr12 == 0) hr12 = 12;
+        snprintf(out_buf, out_sz, "%02d:%02d %s", hr12, ti->tm_min, (ti->tm_hour >= 12) ? "pm" : "am");
+    } else {
+        snprintf(out_buf, out_sz, "%02d:%02d", ti->tm_hour, ti->tm_min);
+    }
+}
+
+static void get_dashboard_date_strings(char *wday_buf, size_t wday_sz, char *date_buf, size_t date_sz) {
+    time_t raw_time = time(NULL);
+    struct tm *ti = localtime(&raw_time);
+    if (!ti) {
+        snprintf(wday_buf, wday_sz, "Wednesday");
+        snprintf(date_buf, date_sz, "11.8.2026");
+        return;
+    }
+    static const char *const W_NAMES[7] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+    int wday = (ti->tm_wday >= 0 && ti->tm_wday < 7) ? ti->tm_wday : 0;
+    snprintf(wday_buf, wday_sz, "%s", W_NAMES[wday]);
+    snprintf(date_buf, date_sz, "%d.%d.%d", ti->tm_mon + 1, ti->tm_mday, ti->tm_year + 1900);
 }
 
 /* Motorsport chamfered panel with glowing header accent strip */
@@ -2146,7 +2178,9 @@ static void render_ev_benz_eq(SDL_Renderer *r, const gt7_state_t *state, const h
     draw_text(r, c_buf, card_x + 154, card_y + 26, 2, text_wh);
 
     /* Row 2: Live Trip Distance & Lap Timer */
-    float trip_dist = (float)state->current_lap * (ui->use_mph ? 2.6f : 4.2f) + ((float)state->current_lap_ms / 60000.0f) * (speed * 0.012f);
+    float trip_dist = (state->session_distance_km > 0.05f) ?
+                      (ui->use_mph ? state->session_distance_km * 0.621371f : state->session_distance_km) :
+                      ((float)state->current_lap * (ui->use_mph ? 2.6f : 4.2f) + ((float)state->current_lap_ms / 60000.0f) * (speed * 0.012f));
     snprintf(c_buf, sizeof(c_buf), "%.1f %s", trip_dist, ui->use_mph ? "mi" : "km");
     draw_text(r, c_buf, card_x + 18, card_y + 60, 2, text_wh);
     int lap_sec = (state->current_lap_ms > 0) ? (int)(state->current_lap_ms / 1000) : (int)((now_ms / 1000) % 3600);
@@ -2216,7 +2250,9 @@ static void render_ev_benz_eq(SDL_Renderer *r, const gt7_state_t *state, const h
     draw_text_centered(r, s_b, mid_cx, pace_y + 52, 1, text_dim);
 
     int status_y = content_y + content_h - 22;
-    draw_text(r, "01:58 pm", 355, status_y, 2, text_dim);
+    char mb_clock[16];
+    get_dashboard_clock(mb_clock, sizeof(mb_clock), true);
+    draw_text(r, mb_clock, 345, status_y, 2, text_dim);
     if (is_p) {
         draw_text(r, "PARK", 525, status_y, 2, mb_red);
         fill_rect(r, 625, status_y - 2, 22, 20, mb_blue);
@@ -2231,7 +2267,7 @@ static void render_ev_benz_eq(SDL_Renderer *r, const gt7_state_t *state, const h
     draw_text(r, "24°F", 718, status_y, 2, text_dim);
 }
 
-/* 2. BMW CURVED DISPLAY OS 8.5/9 (Symmetrical Dual Chevrons, Full-Width 3D Nav Map) */
+/* Motorsport chamfered panel with glowing header accent strip */
 
 /* --- LUXURY OEM VECTOR ICONS (BMW OS 8.5 & VOLVO EX90) --- */
 static void draw_vector_fuel_pump(SDL_Renderer *r, int x, int y, int h, rgba_t c) {
@@ -2416,8 +2452,10 @@ static void render_ev_bmw_i(SDL_Renderer *r, const gt7_state_t *state, const hud
         gear_ch = 'N';
     }
 
-    /* Common session trip distance */
-    float trip_km = (state->current_lap > 0) ? (state->current_lap * 5.807f + state->speed_kmh * 0.02f) : 1503.7f;
+    /* Common session trip distance (accumulated from real driving telemetry) */
+    float trip_km = (state->session_distance_km > 0.01f) ?
+                    (1503.7f + state->session_distance_km) :
+                    ((state->current_lap > 0) ? (1503.7f + state->current_lap * 5.807f + state->speed_kmh * 0.02f) : 1503.7f);
     char trip_str[32];
     snprintf(trip_str, sizeof(trip_str), "%.1f km", trip_km);
 
@@ -3215,9 +3253,15 @@ static void render_ev_bmw_i(SDL_Renderer *r, const gt7_state_t *state, const hud
     draw_icon_headlight(r, 16, content_y + 325, rgba(40, 225, 80, 255));
     draw_icon_headlight(r, 16, content_y + 355, rgba(40, 225, 80, 255));
     draw_text(r, "A", 26, content_y + 350, 1, rgba(40, 225, 80, 255));
-    fill_circle(r, 20, content_y + 400, 10, rgba(235, 30, 30, 255));
-    fill_circle(r, 20, content_y + 400, 8, rgba(0, 0, 0, 255));
-    draw_text_centered(r, "P", 20, content_y + 394, 1, rgba(235, 30, 30, 255));
+    bool park_active = (gear_ch == 'P') || ((state->flags & GT7_FLAG_HANDBRAKE) != 0);
+    if (park_active) {
+        fill_circle(r, 20, content_y + 400, 10, rgba(235, 30, 30, 255));
+        fill_circle(r, 20, content_y + 400, 8, rgba(0, 0, 0, 255));
+        draw_text_centered(r, "P", 20, content_y + 394, 1, rgba(235, 30, 30, 255));
+    } else {
+        draw_circle(r, 20, content_y + 400, 10, 1, rgba(50, 75, 105, 150));
+        draw_text_centered(r, "P", 20, content_y + 394, 1, rgba(50, 75, 105, 150));
+    }
 
     /* 2. Bottom Status Row (y = content_y + content_h - 22) */
     int stat_y = content_y + content_h - 22;
@@ -3230,11 +3274,12 @@ static void render_ev_bmw_i(SDL_Renderer *r, const gt7_state_t *state, const hud
     draw_text(r, batt_str, 94, stat_y + 2, 1, text_wh);
 
     char clock_str[16];
-    snprintf(clock_str, sizeof(clock_str), "12:22");
+    get_dashboard_clock(clock_str, sizeof(clock_str), false);
     draw_text(r, clock_str, 200, stat_y, 2, text_wh);
 
-    /* Center: Speed limit sign (20) + Seatbelt warning + Top-down BMW silhouette */
-    draw_speed_limit_sign(r, 480, stat_y + 6, 20, false);
+    /* Center: Speed limit sign (Pit / Track) + Seatbelt warning + Top-down BMW silhouette */
+    int lim_val = (state->flags & GT7_FLAG_IN_PIT) ? (ui->use_mph ? 40 : 60) : 20;
+    draw_speed_limit_sign(r, 480, stat_y + 6, lim_val, false);
     draw_icon_seatbelt(r, 580, stat_y + 5, m_red);
     draw_topdown_car(r, 620, stat_y + 6, rgba(160, 185, 215, 255));
 
@@ -3330,10 +3375,14 @@ static void render_ev_audi_etron(SDL_Renderer *r, const gt7_state_t *state, cons
              state->session_top_speed_kmh);
     draw_text(r, a_tbuf, left_x + 42, content_y + 102, 1, text_dim);
 
+    char a_clock[16], a_wday[16], a_date[32];
+    get_dashboard_clock(a_clock, sizeof(a_clock), true);
+    get_dashboard_date_strings(a_wday, sizeof(a_wday), a_date, sizeof(a_date));
+
     draw_text(r, "Date & time", left_x + 90, mid_y - 112, 2, text_dim);
-    draw_text(r, "10:43 AM", left_x + 90, mid_y - 80, 4, text_wh);
-    draw_text(r, "Wednesday", left_x + 90, mid_y - 44, 2, text_wh);
-    draw_text(r, "11.3.2026", left_x + 90, mid_y - 22, 2, text_wh);
+    draw_text(r, a_clock, left_x + 90, mid_y - 80, 4, text_wh);
+    draw_text(r, a_wday, left_x + 90, mid_y - 44, 2, text_wh);
+    draw_text(r, a_date, left_x + 90, mid_y - 22, 2, text_wh);
 
     /* Dynamic Oil Temperature Bar */
     int oil_y = mid_y + 90;
@@ -3549,12 +3598,14 @@ static void render_ev_audi_etron(SDL_Renderer *r, const gt7_state_t *state, cons
     draw_thick_line(r, 180, bot_y - 14, 1100, bot_y - 14, 1, rgba(35, 50, 75, 255));
 
     /* Dynamic Left Odometer & Time */
-    float trip_km = (float)state->current_lap * 4.5f + ((float)state->current_lap_ms / 60000.0f) * (state->speed_kmh * 0.015f);
+    float trip_km = (state->session_distance_km > 0.05f) ?
+                    state->session_distance_km :
+                    ((float)state->current_lap * 4.5f + ((float)state->current_lap_ms / 60000.0f) * (state->speed_kmh * 0.015f));
     char odo_buf[24];
     snprintf(odo_buf, sizeof(odo_buf), "%d %s", (int)(8340 + trip_km), ui->use_mph ? "mi" : "km");
     draw_icon_seatbelt(r, 480, bot_y + 4, audi_red);
     draw_text(r, odo_buf, 500, bot_y - 2, 2, text_wh);
-    draw_text(r, "10:43 AM", 500, bot_y + 18, 2, text_dim);
+    draw_text(r, a_clock, 500, bot_y + 18, 2, text_dim);
 
     /* Dynamic Trip Distance */
     char trip_buf[24];
@@ -3769,9 +3820,12 @@ static void render_ev_volvo_ex(SDL_Renderer *r, const gt7_state_t *state, const 
     draw_thick_line(r, 415, content_y + 30, 428, content_y + 35, 2, rgba(45, 225, 115, 255));
     fill_circle(r, 410, content_y + 24, 6, rgba(45, 225, 115, 255));
 
-    draw_text(r, "/ \\", 595, content_y + 16, 2, text_wh);
+    char v_clock[16];
+    get_dashboard_clock(v_clock, sizeof(v_clock), false);
+    draw_text(r, v_clock, 510, content_y + 16, 2, text_wh);
+    draw_text(r, "/ \\", 610, content_y + 16, 2, text_wh);
     /* Moved 11 °C to x=700 so it never touches the red seatbelt icon at x=815 */
-    draw_text(r, "11 °C", 700, content_y + 16, 2, text_wh);
+    draw_text(r, "+ 19 °C", 700, content_y + 16, 2, text_wh);
 
     fill_circle(r, 815, content_y + 20, 4, rgba(225, 30, 30, 255));
     draw_thick_line(r, 813, content_y + 24, 817, content_y + 32, 2, rgba(225, 30, 30, 255));
@@ -3797,13 +3851,22 @@ static void render_ev_volvo_ex(SDL_Renderer *r, const gt7_state_t *state, const 
 
     /* --- BOTTOM RIGHT: DUAL DASHED RANGE PROGRESS BARS --- */
     int rng_x = 810, rng_y = content_y + content_h - 48;
-    draw_vector_battery(r, rng_x, rng_y, 20, 12, 10, text_dim, volvo_cyan);
-    draw_dashed_progress_bar(r, rng_x + 28, rng_y + 2, 8, 1, 8, 8, 4, volvo_cyan, rgba(45, 60, 80, 200));
-    draw_text(r, "0 km", rng_x + 130, rng_y, 2, text_wh);
+    int v_ev_fill = (int)(state->battery_soc_pct / 12.5f);
+    if (v_ev_fill > 8) v_ev_fill = 8;
+    draw_vector_battery(r, rng_x, rng_y, 20, 12, (int)state->battery_soc_pct, text_dim, volvo_cyan);
+    draw_dashed_progress_bar(r, rng_x + 28, rng_y + 2, 8, v_ev_fill > 0 ? v_ev_fill : 7, 8, 8, 4, volvo_cyan, rgba(45, 60, 80, 200));
+    int v_ev_range = (int)(state->battery_soc_pct * (ui->use_mph ? 2.8f : 4.5f));
+    char v_rng_buf[24];
+    snprintf(v_rng_buf, sizeof(v_rng_buf), "%d %s", v_ev_range > 0 ? v_ev_range : 420, ui->use_mph ? "mi" : "km");
+    draw_text(r, v_rng_buf, rng_x + 130, rng_y, 2, text_wh);
 
+    int v_fuel_fill = (int)(state->fuel_pct / 12.5f);
+    if (v_fuel_fill > 8) v_fuel_fill = 8;
     draw_vector_fuel_pump(r, rng_x, rng_y + 22, 14, text_wh);
-    draw_dashed_progress_bar(r, rng_x + 28, rng_y + 25, 8, 6, 8, 8, 4, text_wh, rgba(45, 60, 80, 200));
-    draw_text(r, "540 km", rng_x + 130, rng_y + 22, 2, text_wh);
+    draw_dashed_progress_bar(r, rng_x + 28, rng_y + 25, 8, v_fuel_fill > 0 ? v_fuel_fill : 6, 8, 8, 4, text_wh, rgba(45, 60, 80, 200));
+    int v_fuel_range = (int)(state->fuel_pct * (ui->use_mph ? 3.6f : 5.8f));
+    snprintf(v_rng_buf, sizeof(v_rng_buf), "%d %s", v_fuel_range > 0 ? v_fuel_range : 540, ui->use_mph ? "mi" : "km");
+    draw_text(r, v_rng_buf, rng_x + 130, rng_y + 22, 2, text_wh);
 }
 
 

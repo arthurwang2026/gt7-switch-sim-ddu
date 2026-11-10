@@ -1,6 +1,12 @@
 # GT7 & PC SimHub Switch Sim-DDU Pro (日本語)
 **バージョン: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 デュアルエンジン & True OLED Black 版)**
 
+<p align="center">
+  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest"><img src="https://img.shields.io/github/v/release/athurwang2026/gt7-switch-sim-ddu?color=blue&logo=github&label=Release" alt="GitHub Release"></a>
+  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu"><img src="https://img.shields.io/badge/Platform-Nintendo%20Switch%20%7C%20Atmosph%C3%A8re-E60012?logo=nintendoswitch&logoColor=white" alt="Platform"></a>
+  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro"><img src="https://img.shields.io/badge/Download-gt7__switch__hud.nro-success?logo=nintendo&logoColor=white" alt="Direct Download"></a>
+</p>
+
 [繁體中文](README_ZH.md) | [English](README_EN.md) | [Deutsch](README_DE.md)
 
 **Nintendo Switch (初期型・バッテリー強化版・Switch OLED / Atmosphère 大気層 CFW 環境)** 向けに開発された、ネイティブ Homebrew レーシング＆EV デジタルメーターアプリ（`.nro`）です。Wi-Fi 経由で **PS5 / PS5 Pro の『グランツーリスモ7』(GT7)** からブロードキャストされる 60Hz UDP テレメトリーデータを受信します。Switch 本体の左右 Joy-Con を取り外し、ステアリングコントローラー（ハンコン）のベース直前に設置することで、超低遅延・高精度な本格派 **Sim Racing DDU (Dashboard Display Unit)** として活用できます。
@@ -84,7 +90,7 @@
 
 ## 📦 インストール方法 (Nintendo Switch Atmosphère)
 
-1. [GitHub Releases](https://github.com/d9053326-bot/gt7-switch-sim-ddu/releases) から最新の `gt7_switch_hud.nro` をダウンロードします。
+1. [GitHub Releases 最新リリース](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest) または [直接ダウンロードリンク](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro) から最新の `gt7_switch_hud.nro` をダウンロードします（過去のバージョンは [全リリース一覧](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases) を参照）。
 2. Switch の microSD カードを PC に接続し、以下のパスにコピーします：
    ```
    /switch/gt7_hud/gt7_switch_hud.nro

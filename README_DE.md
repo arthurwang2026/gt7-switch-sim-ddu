@@ -1,6 +1,12 @@
 # GT7 & PC SimHub Switch Sim-DDU Pro (Deutsch)
 **Version: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 Dual-Engine & True OLED Black Edition)**
 
+<p align="center">
+  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest"><img src="https://img.shields.io/github/v/release/athurwang2026/gt7-switch-sim-ddu?color=blue&logo=github&label=Release" alt="GitHub Release"></a>
+  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu"><img src="https://img.shields.io/badge/Platform-Nintendo%20Switch%20%7C%20Atmosph%C3%A8re-E60012?logo=nintendoswitch&logoColor=white" alt="Platform"></a>
+  <a href="https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro"><img src="https://img.shields.io/badge/Download-gt7__switch__hud.nro-success?logo=nintendo&logoColor=white" alt="Direct Download"></a>
+</p>
+
 [繁體中文](README_ZH.md) | [English](README_EN.md) | [日本語](README_JA.md)
 
 Ein natives Homebrew Sim-Racing Dashboard Display Unit (`.nro`) speziell für die **Nintendo Switch (V1, V2 und Switch OLED unter Atmosphère Custom Firmware)**. Entwickelt, um 60Hz UDP-Telemetriedaten in Echtzeit direkt von der **PS5 / PS5 Pro mit *Gran Turismo 7*** über lokales WLAN zu empfangen. Nehmen Sie die linken und rechten Joy-Cons ab, montieren Sie die Switch direkt vor Ihrer Lenkrad-Base und genießen Sie ein professionelles, extrem latenzarmes **Sim-Racing DDU**.
@@ -84,7 +90,7 @@ Ein natives Homebrew Sim-Racing Dashboard Display Unit (`.nro`) speziell für di
 
 ## 📦 Installation (Nintendo Switch Atmosphère)
 
-1. Laden Sie die neueste `gt7_switch_hud.nro` von [GitHub Releases](https://github.com/d9053326-bot/gt7-switch-sim-ddu/releases) herunter.
+1. Laden Sie die neueste `gt7_switch_hud.nro` direkt von den [GitHub Releases](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest) oder über den [Direktdownload-Link](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro) herunter (eine Übersicht aller Versionen finden Sie unter [Releases-Übersicht](https://github.com/athurwang2026/gt7-switch-sim-ddu/releases)).
 2. Verbinden Sie Ihre microSD-Karte mit dem Computer und kopieren Sie `gt7_switch_hud.nro` in folgenden Pfad:
    ```
    /switch/gt7_hud/gt7_switch_hud.nro
