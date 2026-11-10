@@ -4722,11 +4722,12 @@ static void render_ip_modal(SDL_Renderer *r, const gt7_client_t *client, hud_ui_
     fill_rect(r, mx + 40, my + 72, mw - 80, 50, rgba(0, 0, 0, 255));
     draw_rect(r, mx + 40, my + 72, mw - 80, 50, 2, rgba(0, 225, 255, 255));
     draw_text_centered(r, ui->edit_ip[0] ? ui->edit_ip : "AUTO-DETECT OR TAP IP...", SCREEN_W / 2, my + 86, 4, rgba(255, 255, 255, 255));
+    draw_text_centered(r, "TIP: LOCK PS5 IP TO PREVENT WI-FI TIMEOUTS & ROUTER UDP FILTERING", SCREEN_W / 2, my + 123, 1, rgba(0, 240, 150, 230));
 
     static const char *keys[12] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "DEL"};
     int kw = 156, kh = 50, gap = 10;
     int gx = mx + (mw - (kw * 3 + gap * 2)) / 2;
-    int gy = my + 132;
+    int gy = my + 134;
 
     for (int i = 0; i < 12; ++i) {
         int row = i / 3;
@@ -4755,13 +4756,13 @@ static void render_ip_modal(SDL_Renderer *r, const gt7_client_t *client, hud_ui_
                            selected ? rgba(0, 0, 0, 255) : rgba(200, 220, 245, 255));
     }
 
-    /* 3 Action Buttons: [AUTO DETECT (DEFAULT)], [SET MANUAL IP], [CANCEL] */
+    /* 3 Action Buttons: [AUTO DETECT (DEFAULT)], [LOCK MANUAL IP], [CANCEL] */
     int by = proto_btn_y + ph + 16;
     fill_rect(r, gx, by, 180, 52, rgba(0, 215, 255, 255));
     draw_text_centered(r, "AUTO DETECT", gx + 90, by + 18, 2, rgba(10, 14, 20, 255));
 
     fill_rect(r, gx + 192, by, 160, 52, rgba(0, 210, 100, 255));
-    draw_text_centered(r, "MANUAL IP", gx + 272, by + 18, 2, rgba(10, 14, 20, 255));
+    draw_text_centered(r, "LOCK MANUAL IP", gx + 272, by + 18, 2, rgba(10, 14, 20, 255));
 
     fill_rect(r, gx + 364, by, 124, 52, rgba(215, 50, 60, 255));
     draw_text_centered(r, "CANCEL", gx + 426, by + 18, 2, rgba(255, 255, 255, 255));
@@ -4831,12 +4832,21 @@ void hud_render(SDL_Renderer *r, const gt7_state_t *state, const gt7_client_t *c
             snprintf(status_str, sizeof(status_str), "SIMHUB WAIT (:20777/:33740) %s",
                      state->demo_mode ? "| DEMO" : "");
             status_col = rgba(0, 235, 190, 255);
+        } else if (client->reconnecting_direct) {
+            snprintf(status_str, sizeof(status_str), "RECONNECTING PS5 (%s)... %s",
+                     client->ps5_ip, state->demo_mode ? "| DEMO" : "");
+            status_col = rgba(255, 185, 0, 255); /* Amber / Reconnecting targeted */
         } else if (client->auto_detect) {
-            snprintf(status_str, sizeof(status_str), "AUTO PS5/PC (%s.*) %s",
-                     client->subnet_prefix, state->demo_mode ? "| DEMO" : "");
+            if (client->last_known_ps5_ip[0] != '\0' && strcasecmp(client->last_known_ps5_ip, "AUTO") != 0) {
+                snprintf(status_str, sizeof(status_str), "AUTO PS5 (LAST: %s) %s",
+                         client->last_known_ps5_ip, state->demo_mode ? "| DEMO" : "");
+            } else {
+                snprintf(status_str, sizeof(status_str), "AUTO SEARCHING PS5 (%s.*) %s",
+                         client->subnet_prefix, state->demo_mode ? "| DEMO" : "");
+            }
             status_col = rgba(0, 220, 255, 255);
         } else {
-            snprintf(status_str, sizeof(status_str), "MANUAL (%s) %s",
+            snprintf(status_str, sizeof(status_str), "MANUAL WAIT (%s) %s",
                      client->ps5_ip, state->demo_mode ? "| DEMO" : "");
             status_col = rgba(255, 195, 0, 255);
         }

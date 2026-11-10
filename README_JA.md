@@ -1,5 +1,6 @@
 # GT7 & PC SimHub Switch Sim-DDU Pro (日本語)
-**バージョン: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 デュアルエンジン & True OLED Black 版)**
+**バージョン: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 デュアルエンジン & True OLED Black 版)**  
+**開発者 / 作者**: [ArthurWang](https://github.com/arthurwang2026) | **リポジトリ**: [gt7-switch-sim-ddu](https://github.com/arthurwang2026/gt7-switch-sim-ddu)
 
 <p align="center">
   <a href="https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest"><img src="https://img.shields.io/github/v/release/arthurwang2026/gt7-switch-sim-ddu?color=blue&logo=github&label=Release" alt="GitHub Release"></a>
@@ -103,3 +104,13 @@
    - **方法 A（SimHub UDP 転送 — 推奨）**: SimHub の `Game Config -> UDP Forwarding` を有効にし、宛先 IP に **Switch の IP アドレス**、ポートに **`20777`**（または `8000` / `33740`）を設定します。Forza Horizon 独自の 324B パケット（`dash_off = 244` vs `232` 自動判別、ギア `0=R, 1..10=1〜10速, >=11=N`、華氏→摂氏タイヤ温度変換、グリップ限界スリップ率スケーリング、4輪サスペンションストローク）に完全対応しています。
    - **方法 B（Forza ゲーム内 Data Out 直接送信）**: ゲーム内の『設定 -> HUD とゲームプレイ』で **データ出力 = オン**、**IP アドレス = Switch の IP**、**ポート = `8000` または `20777`** に設定します。
    - **方法 C（Python ブリッジ）**: `python3 tools/simhub_bridge.py --switch-ip <SwitchのIP> --port 20777` を実行します。
+
+
+---
+
+## ⚡ Wi-Fi 接続安定化＆ハートビート自動復旧機能 (Wi-Fi Stability & Anti-Lock)
+
+長時間の 60Hz UDP 通信でルーターの DoS / UDP Flood 誤検知やパケットロスによる切断を防ぐための**3段階自動保護機能**を実装：
+1. **ダイレクト高速再接続（Direct Fast Reconnect）**：一時的な Wi-Fi の乱れが発生した場合、直前に通信していた PS5 の IP に対して低頻度（800ms）のユニキャストハートビートを送信し、ネットワーク負荷をかけずに即時復旧します。
+2. **ワンタップ固定 IP ロック（`LOCK MANUAL IP`）**：タッチ画面下部の `IP: AUTO` をタップし、緑色の `LOCK MANUAL IP` を押すだけで PS5 の IP を永続保存できます。
+3. **Socket 自動リフレッシュ（Socket Auto-Healing）**：切断が 8 秒以上続き ICMP エラーが発生した場合、UDP ソケットを自動で解放・再生成します。ルーターや PS5 を再起動する必要はありません。

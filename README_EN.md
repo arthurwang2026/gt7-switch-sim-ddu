@@ -1,5 +1,6 @@
 # GT7 & PC SimHub Switch Sim-DDU Pro (English)
-**Version: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 Dual-Engine & True OLED Black Edition)**
+**Version: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 Dual-Engine & True OLED Black Edition)**  
+**Author**: [ArthurWang](https://github.com/arthurwang2026) | **Repository**: [gt7-switch-sim-ddu](https://github.com/arthurwang2026/gt7-switch-sim-ddu)
 
 <p align="center">
   <a href="https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest"><img src="https://img.shields.io/github/v/release/arthurwang2026/gt7-switch-sim-ddu?color=blue&logo=github&label=Release" alt="GitHub Release"></a>
@@ -103,3 +104,14 @@ A native Homebrew Sim Racing Dashboard Display Unit (`.nro`) tailored specifical
    - **Option A (SimHub UDP Forwarding — Recommended)**: Let SimHub auto-configure your game in *Game Config*, then enable **UDP Forwarding** in SimHub to your Switch's IP address on port **`20777`** (or **`8000`** / **`33740`**). Full support for Forza 324B Horizon Dash (`dash_off = 244` vs `232` smart auto-detection, exact Forza gear mapping `0=R, 1..10=Gears, >=11=N`, pause zero-packet protection, full-range `°F -> °C` tire temperature conversion, normalized grip-limit slip scaling, and 4-wheel suspension travel).
    - **Option B (Direct In-Game Forza Data Out)**: In Forza *Settings -> HUD and Gameplay*, set **Data Out = ON**, **Data Out IP Address = `<Switch_IP>`**, and **Data Out IP Port = `8000` (or `20777`)**.
    - **Option C (Python Bridge)**: Run `python3 tools/simhub_bridge.py --switch-ip <Switch_IP> --port 20777`.
+
+
+---
+
+## ⚡ Wi-Fi Stability & Anti-Lock Heartbeat Engine
+
+Designed to counteract router DoS / UDP flood filters and IGMP snooping packet drops during long 60Hz telemetry sessions:
+1. **Direct Fast Reconnect**: When experiencing momentary Wi-Fi jitter, the DDU immediately attempts direct unicast recovery to the last known PS5 IP at 800ms intervals, completely bypassing subnet broadcast storms.
+2. **One-Tap Manual IP Lock (`LOCK MANUAL IP`)**: Tap `IP: AUTO` on the touch screen, then tap the green `LOCK MANUAL IP` button to permanently lock your PS5 IP.
+3. **Socket Auto-Healing**: If disconnected for > 8s with OS-level ICMP Port Unreachable errors, the DDU automatically recycles and recreates a clean non-blocking UDP socket, restoring connectivity without restarting your router or console!
+4. **Recommended Network Setup**: Connect PS5 via wired Ethernet, Switch on 5GHz Wi-Fi; whitelist UDP ports 33739/33740 if your router runs aggressive DoS protection.

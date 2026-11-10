@@ -222,10 +222,15 @@ typedef struct {
     int forza_sock_fd;       /* Tertiary non-blocking UDP socket bound to port 8000 (Forza Horizon / SimHub UDP Forwarding) */
     bool auto_detect;        /* True = Auto-detect PS5 / PC SimHub via subnet scan + broadcast (default) */
     char ps5_ip[64];         /* Locked or manual PS5 / PC SimHub IP */
+    char last_known_ps5_ip[64]; /* Last confirmed active PS5 IP (retained across temporary disconnects) */
     char local_ip[64];       /* Detected local Wi-Fi IP of Switch/Host */
     char subnet_prefix[48];  /* e.g. "192.168.1" */
     uint8_t scan_cursor;     /* Current host octet being swept during auto-discovery */
     uint32_t last_heartbeat_ms;
+    uint32_t last_ps5_seen_ms;       /* Timestamp when last live packet was received */
+    uint32_t last_socket_recycle_ms; /* Timestamp of last UDP socket reset */
+    uint32_t last_bcast_ms;          /* Timestamp of last broadcast packet (rate limited) */
+    bool reconnecting_direct;        /* True when performing targeted unicast recovery to last_known_ps5_ip */
     gt7_heartbeat_mode_t heartbeat_mode; /* AUTO, PKT_C, PKT_TILDE, PKT_A, PKT_B */
     char active_hb_char;     /* 'A', 'B', '~', 'C' currently being sent */
     int active_theme_hint;   /* UI theme hint (e.g. 2 for EV) */
@@ -250,6 +255,7 @@ void gt7_cycle_heartbeat_mode(gt7_client_t *client);
 const char *gt7_heartbeat_mode_name(gt7_heartbeat_mode_t mode);
 void gt7_reset_session(gt7_state_t *state);
 void gt7_cycle_demo_circuit(gt7_state_t *state);
+void gt7_recycle_socket(gt7_client_t *client);
 void gt7_update(gt7_client_t *client, gt7_state_t *state, uint32_t now_ms);
 void gt7_update_demo(gt7_state_t *state, uint32_t now_ms, int theme_index);
 bool gt7_decrypt_packet(const uint8_t *raw, size_t len, uint8_t *decrypted_out);

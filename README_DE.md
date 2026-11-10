@@ -1,5 +1,6 @@
 # GT7 & PC SimHub Switch Sim-DDU Pro (Deutsch)
-**Version: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 Dual-Engine & True OLED Black Edition)**
+**Version: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 Dual-Engine & True OLED Black Edition)**  
+**Autor**: [ArthurWang](https://github.com/arthurwang2026) | **Repository**: [gt7-switch-sim-ddu](https://github.com/arthurwang2026/gt7-switch-sim-ddu)
 
 <p align="center">
   <a href="https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest"><img src="https://img.shields.io/github/v/release/arthurwang2026/gt7-switch-sim-ddu?color=blue&logo=github&label=Release" alt="GitHub Release"></a>
@@ -103,3 +104,13 @@ Ein natives Homebrew Sim-Racing Dashboard Display Unit (`.nro`) speziell für di
    - **Option A (SimHub UDP Forwarding — Empfohlen)**: Aktivieren Sie in SimHub unter *Game Config* das **UDP Forwarding** an die **Switch-IP** und Port **`20777`** (oder **`8000`** / **`33740`**). Volle Unterstützung für Forza Horizon 324B Dash-Pakete (intelligente `dash_off = 244` vs `232` Erkennung, exakte Forza-Ganganzeige `0=R, 1..10=Gänge, >=11=N`, `°F -> °C` Reifentemperatur-Umrechnung, Grip-Limit-Schlupfskalierung und 4-Rad-Federwege).
    - **Option B (Direkter Forza Data Out im Spiel)**: Unter *Einstellungen -> HUD und Gameplay* **Datenausgabe = EIN**, **IP-Adresse = `<Switch_IP>`** und **Port = `8000` (oder `20777`)** einstellen.
    - **Option C (Python-Bridge)**: `python3 tools/simhub_bridge.py --switch-ip <Switch_IP> --port 20777` ausführen.
+
+
+---
+
+## ⚡ Wi-Fi-Stabilität & Anti-Lock-Heartbeat (Wi-Fi Stability & Anti-Lock)
+
+Entwickelt, um Router-DoS-Filter und Paketverluste bei kontinuierlicher 60Hz UDP-Telemetrie zu verhindern:
+1. **Gezielte Schnell-Wiederverbindung (Direct Fast Reconnect)**: Bei kurzen Wi-Fi-Schwankungen sendet die DDU schonende Unicast-Heartbeats (800ms) direkt an die zuletzt bekannte PS5-IP, anstatt Broadcast-Stürme im Netzwerk auszulösen.
+2. **One-Tap Manuelle IP-Sperre (`LOCK MANUAL IP`)**: Tippen Sie unten auf `IP: AUTO` und anschließend auf den grünen Button `LOCK MANUAL IP`, um die PS5-IP dauerhaft zu speichern.
+3. **Automatische Socket-Selbstheilung (Socket Auto-Healing)**: Bleibt die Verbindung länger als 8s aus, wird der UDP-Socket automatisch geschlossen und neu initialisiert – kein Router- oder Konsolen-Neustart erforderlich!

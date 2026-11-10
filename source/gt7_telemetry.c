@@ -331,12 +331,39 @@ bool gt7_init(gt7_client_t *client, gt7_state_t *state, const char *ps5_ip) {
 void gt7_set_ip(gt7_client_t *client, const char *ps5_ip) {
     if (!ps5_ip || ps5_ip[0] == '\0' || strcasecmp(ps5_ip, "AUTO") == 0) {
         client->auto_detect = true;
-        strncpy(client->ps5_ip, "AUTO", sizeof(client->ps5_ip) - 1);
+        snprintf(client->ps5_ip, sizeof(client->ps5_ip), "AUTO");
         return;
     }
     client->auto_detect = false;
-    strncpy(client->ps5_ip, ps5_ip, sizeof(client->ps5_ip) - 1);
-    client->ps5_ip[sizeof(client->ps5_ip) - 1] = '\0';
+    snprintf(client->ps5_ip, sizeof(client->ps5_ip), "%s", ps5_ip);
+    snprintf(client->last_known_ps5_ip, sizeof(client->last_known_ps5_ip), "%s", ps5_ip);
+}
+
+void gt7_recycle_socket(gt7_client_t *client) {
+    if (!client) return;
+    if (client->sock_fd >= 0) {
+        close(client->sock_fd);
+        client->sock_fd = -1;
+    }
+    client->sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (client->sock_fd >= 0) {
+        int reuse = 1;
+        setsockopt(client->sock_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+        int broadcast = 1;
+        setsockopt(client->sock_fd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
+        int flags = fcntl(client->sock_fd, F_GETFL, 0);
+        if (flags >= 0) {
+            fcntl(client->sock_fd, F_SETFL, flags | O_NONBLOCK);
+        }
+        struct sockaddr_in bind_addr;
+        memset(&bind_addr, 0, sizeof(bind_addr));
+        bind_addr.sin_family = AF_INET;
+        bind_addr.sin_port = htons(GT7_RECV_PORT);
+        bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        if (bind(client->sock_fd, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
+            /* Socket remains usable for outbound heartbeats */
+        }
+    }
 }
 
 void gt7_set_auto_detect(gt7_client_t *client, gt7_state_t *state) {
@@ -371,7 +398,7 @@ const char *gt7_heartbeat_mode_name(gt7_heartbeat_mode_t mode) {
     }
 }
 
-static void gt7_send_heartbeat(gt7_client_t *client, bool connected) {
+static void gt7_send_heartbeat(gt7_client_t *client, bool connected, uint32_t now_ms) {
     if (client->sock_fd < 0) return;
     if (client->heartbeat_mode == GT7_HEARTBEAT_SIMHUB) {
         /* PC SimHub pushes UDP directly to Switch/Host (:20777 or :33740), no PS5 heartbeat needed */
@@ -389,12 +416,12 @@ static void gt7_send_heartbeat(gt7_client_t *client, bool connected) {
         case GT7_HEARTBEAT_AUTO:
         default:
             /* Auto-adaptive:
-               - If disconnected and fail count > 8 (~2s): fallback to 'A' to probe older GT7 versions
+               - When disconnected, alternate 'A' and 'C' to wake up GT7 if it hung
                - If in Luxury EV Cockpit (active_theme_hint == 2): send '~' to get EV torque & regen kW
                - Else (Motorsport, Tach, F1, MoTeC, WRC, JDM, Track): send 'C' to get tire surface, category, steer & lap ms
             */
-            if (!connected && client->hb_fail_count > 8) {
-                hb_char = 'A';
+            if (!connected && client->hb_fail_count > 4) {
+                hb_char = (client->hb_fail_count % 2 == 0) ? 'A' : 'C';
             } else if (client->active_theme_hint == 2) {
                 hb_char = '~';
             } else {
@@ -410,39 +437,57 @@ static void gt7_send_heartbeat(gt7_client_t *client, bool connected) {
     dest.sin_family = AF_INET;
     dest.sin_port = htons(GT7_SEND_PORT);
 
-    /* 1. If we have a locked/manual IP, send directly to it */
-    if (strcmp(client->ps5_ip, "AUTO") != 0 && inet_pton(AF_INET, client->ps5_ip, &dest.sin_addr) == 1) {
-        sendto(client->sock_fd, heartbeat_msg, 1, 0,
-               (struct sockaddr *)&dest, sizeof(dest));
+    bool has_direct_ip = (client->ps5_ip[0] != '\0' && strcasecmp(client->ps5_ip, "AUTO") != 0);
+    bool has_last_ip = (client->last_known_ps5_ip[0] != '\0' && strcasecmp(client->last_known_ps5_ip, "AUTO") != 0);
+    if (!has_direct_ip && has_last_ip) {
+        snprintf(client->ps5_ip, sizeof(client->ps5_ip), "%s", client->last_known_ps5_ip);
+        has_direct_ip = true;
     }
 
-    /* 2. If in Auto-Detect mode and not yet locked on a live stream, sweep subnet + broadcasts */
-    if (client->auto_detect && !connected) {
-        /* Global broadcast 255.255.255.255 */
-        dest.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-        sendto(client->sock_fd, heartbeat_msg, 1, 0,
-               (struct sockaddr *)&dest, sizeof(dest));
+    uint32_t silence_ms = (client->last_ps5_seen_ms > 0 && now_ms >= client->last_ps5_seen_ms)
+                          ? (now_ms - client->last_ps5_seen_ms) : 999999;
 
-        /* Directed subnet broadcast e.g. 192.168.1.255 */
-        char bcast_ip[64];
-        snprintf(bcast_ip, sizeof(bcast_ip), "%s.255", client->subnet_prefix);
-        if (inet_pton(AF_INET, bcast_ip, &dest.sin_addr) == 1) {
+    /* 1. Fast targeted recovery: If connected OR if we have a known target IP within 15 seconds of silence */
+    if (connected || (has_direct_ip && (!client->auto_detect || silence_ms < 15000))) {
+        client->reconnecting_direct = !connected;
+        if (inet_pton(AF_INET, client->ps5_ip, &dest.sin_addr) == 1) {
+            sendto(client->sock_fd, heartbeat_msg, 1, 0,
+                   (struct sockaddr *)&dest, sizeof(dest));
+        }
+        /* Never flood the network or do subnet sweeps when in direct mode / recent disconnect! */
+        return;
+    }
+
+    /* 2. Fallback Subnet Discovery (gentle, throttled to max 3~4 pkts/s total) */
+    client->reconnecting_direct = false;
+    if (client->auto_detect && !connected) {
+        /* Always keep trying the last known IP as top priority */
+        if (has_last_ip && inet_pton(AF_INET, client->last_known_ps5_ip, &dest.sin_addr) == 1) {
             sendto(client->sock_fd, heartbeat_msg, 1, 0,
                    (struct sockaddr *)&dest, sizeof(dest));
         }
 
-        /* Active unicast sweep across the /24 subnet (32 hosts per pulse -> full subnet in ~2s) */
-        for (int i = 0; i < 32; ++i) {
-            char target[64];
-            snprintf(target, sizeof(target), "%s.%u", client->subnet_prefix, client->scan_cursor);
-            client->scan_cursor++;
-            if (client->scan_cursor == 0 || client->scan_cursor >= 255) {
-                client->scan_cursor = 1;
-            }
-            if (inet_pton(AF_INET, target, &dest.sin_addr) == 1) {
+        /* Directed subnet broadcast e.g. 192.168.1.255, throttled to once every 2500ms */
+        if (now_ms - client->last_bcast_ms >= 2500) {
+            client->last_bcast_ms = now_ms;
+            char bcast_ip[64];
+            snprintf(bcast_ip, sizeof(bcast_ip), "%s.255", client->subnet_prefix);
+            if (inet_pton(AF_INET, bcast_ip, &dest.sin_addr) == 1) {
                 sendto(client->sock_fd, heartbeat_msg, 1, 0,
                        (struct sockaddr *)&dest, sizeof(dest));
             }
+        }
+
+        /* Probe ONLY 1 host per pulse (max 2~4 hosts/sec, NEVER 32 hosts flood!) */
+        char target[64];
+        snprintf(target, sizeof(target), "%s.%u", client->subnet_prefix, client->scan_cursor);
+        client->scan_cursor++;
+        if (client->scan_cursor == 0 || client->scan_cursor >= 255) {
+            client->scan_cursor = 1;
+        }
+        if (inet_pton(AF_INET, target, &dest.sin_addr) == 1) {
+            sendto(client->sock_fd, heartbeat_msg, 1, 0,
+                   (struct sockaddr *)&dest, sizeof(dest));
         }
     }
 }
@@ -1834,20 +1879,33 @@ static void poll_udp_socket(int fd, gt7_client_t *client, gt7_state_t *state, ui
             state->connected = true;
             state->demo_mode = false;
             state->last_rx_ms = now_ms;
+            client->hb_fail_count = 0;
+            client->reconnecting_direct = false;
             char detected_ip[INET_ADDRSTRLEN];
             if (inet_ntop(AF_INET, &sender.sin_addr, detected_ip, sizeof(detected_ip))) {
-                strncpy(client->ps5_ip, detected_ip, sizeof(client->ps5_ip) - 1);
-                client->ps5_ip[sizeof(client->ps5_ip) - 1] = '\0';
+                snprintf(client->ps5_ip, sizeof(client->ps5_ip), "%s", detected_ip);
+                snprintf(client->last_known_ps5_ip, sizeof(client->last_known_ps5_ip), "%s", detected_ip);
+                client->last_ps5_seen_ms = now_ms;
             }
         }
     }
 }
 
 void gt7_update(gt7_client_t *client, gt7_state_t *state, uint32_t now_ms) {
-    uint32_t hb_interval = (client->auto_detect && !state->connected) ? 250 : 1000;
+    uint32_t hb_interval = 1000;
+    if (!state->connected) {
+        if (client->reconnecting_direct) {
+            hb_interval = 800; /* Targeted gentle unicast to PS5 IP */
+        } else if (client->auto_detect) {
+            hb_interval = 400; /* Gentle step-by-step sweep (1 host per pulse) */
+        }
+    }
     if (now_ms - client->last_heartbeat_ms >= hb_interval) {
-        gt7_send_heartbeat(client, state->connected);
+        gt7_send_heartbeat(client, state->connected, now_ms);
         client->last_heartbeat_ms = now_ms;
+        if (!state->connected) {
+            client->hb_fail_count++;
+        }
     }
 
     /* Poll UDP port 33740 (GT7 + SimHub), UDP port 20777 (SimHub default), and UDP port 8000 (Forza Horizon / SimHub) */
@@ -1857,6 +1915,13 @@ void gt7_update(gt7_client_t *client, gt7_state_t *state, uint32_t now_ms) {
 
     if (state->connected && (now_ms - state->last_rx_ms > 2500)) {
         state->connected = false;
+        client->reconnecting_direct = (client->last_known_ps5_ip[0] != '\0' && strcasecmp(client->last_known_ps5_ip, "AUTO") != 0);
+    }
+
+    /* Automatic Socket Recovery: If no packets for > 8s and socket wasn't recycled in last 12s, refresh UDP socket */
+    if (!state->connected && (now_ms - state->last_rx_ms > 8000) && (now_ms - client->last_socket_recycle_ms > 12000)) {
+        gt7_recycle_socket(client);
+        client->last_socket_recycle_ms = now_ms;
     }
 }
 

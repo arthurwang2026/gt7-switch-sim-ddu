@@ -1,5 +1,6 @@
 # GT7 & PC SimHub Switch Sim-DDU Pro (繁體中文)
-**版本號: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 雙遙測引擎 & True OLED Black 旗艦版)**
+**版本號: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 雙遙測引擎 & True OLED Black 旗艦版)**  
+**開發者 / 作者**: [ArthurWang](https://github.com/arthurwang2026) | **原始碼儲存庫**: [gt7-switch-sim-ddu](https://github.com/arthurwang2026/gt7-switch-sim-ddu)
 
 <p align="center">
   <a href="https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest"><img src="https://img.shields.io/github/v/release/arthurwang2026/gt7-switch-sim-ddu?color=blue&logo=github&label=Release" alt="GitHub Release"></a>
@@ -116,3 +117,14 @@
      python3 tools/simhub_bridge.py --switch-ip <Switch的IP> --port 20777
      ```
    - **方式 D（SimHub Custom UDP JSON）**：執行 `python3 tools/simhub_bridge.py --template` 複製 JSON 模板貼入 SimHub Custom UDP 輸出至 `<Switch的IP>:20777`。
+
+
+---
+
+## ⚡ Wi-Fi 斷線防護與心跳包防鎖死優化 (Wi-Fi Stability & Anti-Lock Heartbeat)
+
+針對特定無線路由器（如開啟 DoS / UDP Flood 防護或 IGMP Snooping）在長時間 60Hz UDP 傳輸下誤判丟包的問題，本版本實裝了**三階防護機制**：
+1. **定向快速重連（Direct Fast Reconnect）**：發生微小 Wi-Fi 抖動或丟包時，系統自動記憶最後通訊的 PS5 IP，並以低頻（800ms）單播心跳包精準重連，不再觸發全網段 255 廣播風暴。
+2. **一鍵鎖定 PS5 實體 IP（LOCK MANUAL IP）**：點擊下方 `IP: AUTO`，彈出選單後點擊綠色 `LOCK MANUAL IP` 即可永久保存 PS5 IP，徹底免疫無線廣播遺失。
+3. **UDP Socket 自愈重置（Socket Auto-Healing）**：若連線斷開逾 8 秒且檢測到系統 ICMP Port Unreachable 錯誤，軟體自動釋放並重建乾淨的 UDP Socket，無須重開路由器或 PS5！
+4. **建議設定**：PS5 優先使用實體有線網路，Switch 連接 5GHz Wi-Fi；若路由器具備「DoS 防護」或「UDP Flood 防禦」，建議針對遊戲埠（33739/33740）加入白名單。
