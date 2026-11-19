@@ -6,6 +6,8 @@ build_switch/
 *.nacp
 scratch/
 gt7_switch_hud_sim
+tests/test_telemetry
+tests/test_hud_touch
 capture_screens
 raw_screens/
 .DS_Store

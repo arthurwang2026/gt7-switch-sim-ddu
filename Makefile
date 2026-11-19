@@ -6,7 +6,7 @@
 
 TARGET_HOST := gt7_switch_hud_sim
 HOST_CC     := clang
-HOST_SRCS   := source/main.c source/hud_renderer.c source/gt7_telemetry.c source/salsa20.c
+HOST_SRCS   := source/main.c source/hud_renderer.c source/hud_ev_cockpits.c source/gt7_telemetry.c source/salsa20.c
 
 ifneq ($(strip $(DEVKITPRO)),)
 # ================= NINTENDO SWITCH LIBNX (.NRO) BUILD =================
@@ -17,9 +17,9 @@ BUILD       := build_switch
 SOURCES     := source
 INCLUDES    := source
 
-APP_TITLE   := GT7 Telemetry HUD
-APP_AUTHOR  := Switch SimRacing Lab
-APP_VERSION := _aw_1.11.06.1220
+APP_TITLE   := GT7 Sim-DDU Pro
+APP_AUTHOR  := ArthurWang
+APP_VERSION := _aw_1.11.19.1305
 
 ARCH        := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 CFLAGS      := -g -Wall -O2 -ffunction-sections $(ARCH) $(DEFINES)
@@ -66,7 +66,7 @@ SDL_CFLAGS  := $(shell sdl2-config --cflags)
 SDL_LIBS    := $(shell sdl2-config --libs)
 HOST_CFLAGS := -Wall -Wextra -O2 $(SDL_CFLAGS) -I./source
 
-.PHONY: all host run switch-docker clean
+.PHONY: all host run test switch-docker clean
 
 all: host
 
@@ -75,6 +75,16 @@ host: $(TARGET_HOST)
 
 $(TARGET_HOST): $(HOST_SRCS)
 	$(HOST_CC) $(HOST_CFLAGS) $(HOST_SRCS) -o $(TARGET_HOST) $(SDL_LIBS) -lm
+
+test: tests/test_telemetry tests/test_hud_touch
+	./tests/test_telemetry
+	./tests/test_hud_touch
+
+tests/test_telemetry: tests/test_telemetry.c source/gt7_telemetry.c source/salsa20.c source/gt7_telemetry.h
+	$(HOST_CC) -Wall -Wextra -O2 -I./source tests/test_telemetry.c source/gt7_telemetry.c source/salsa20.c -o $@ -lm
+
+tests/test_hud_touch: tests/test_hud_touch.c source/hud_renderer.c source/hud_ev_cockpits.c source/gt7_telemetry.c source/salsa20.c source/hud_internal.h source/hud_renderer.h source/gt7_telemetry.h
+	$(HOST_CC) $(HOST_CFLAGS) tests/test_hud_touch.c source/hud_renderer.c source/hud_ev_cockpits.c source/gt7_telemetry.c source/salsa20.c -o $@ $(SDL_LIBS) -lm
 
 run: $(TARGET_HOST)
 	./$(TARGET_HOST)
@@ -86,5 +96,5 @@ switch-docker:
 	@echo "Done: gt7_switch_hud.nro"
 
 clean:
-	rm -rf $(TARGET_HOST) build_switch *.nro *.nacp *.elf
+	rm -rf $(TARGET_HOST) build_switch *.nro *.nacp *.elf tests/test_telemetry tests/test_hud_touch
 endif

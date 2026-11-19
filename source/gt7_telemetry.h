@@ -15,7 +15,7 @@ extern "C" {
 #define FORZA_RECV_PORT  8000
 #define GT7_MAGIC_G7S0   0x47375330U
 
-#define GT7_APP_VERSION "_aw_1.11.06.1220"
+#define GT7_APP_VERSION "_aw_1.11.19.1305"
 
 #define GT7_TRACE_LEN 160
 #define GT7_TRACK_PTS 500
@@ -221,16 +221,21 @@ typedef struct {
     int simhub_sock_fd;      /* Secondary non-blocking UDP socket bound to port 20777 (SimHub default) */
     int forza_sock_fd;       /* Tertiary non-blocking UDP socket bound to port 8000 (Forza Horizon / SimHub UDP Forwarding) */
     bool auto_detect;        /* True = Auto-detect PS5 / PC SimHub via subnet scan + broadcast (default) */
-    char ps5_ip[64];         /* Locked or manual PS5 / PC SimHub IP */
+    char ps5_ip[64];         /* Locked or manual PS5 IP */
     char last_known_ps5_ip[64]; /* Last confirmed active PS5 IP (retained across temporary disconnects) */
+    char simhub_ip[64];      /* Last confirmed PC SimHub / Forza sender IP */
     char local_ip[64];       /* Detected local Wi-Fi IP of Switch/Host */
     char subnet_prefix[48];  /* e.g. "192.168.1" */
+    uint8_t local_host_octet;/* Own last octet to skip during subnet sweep */
     uint8_t scan_cursor;     /* Current host octet being swept during auto-discovery */
     uint32_t last_heartbeat_ms;
-    uint32_t last_ps5_seen_ms;       /* Timestamp when last live packet was received */
+    uint32_t last_ps5_seen_ms;       /* Timestamp when last live GT7 PS5 packet was received */
     uint32_t last_socket_recycle_ms; /* Timestamp of last UDP socket reset */
-    uint32_t last_bcast_ms;          /* Timestamp of last broadcast packet (rate limited) */
+    uint32_t last_bcast_ms;          /* Timestamp of last directed subnet broadcast */
+    uint32_t last_bcast_global_ms;   /* Timestamp of last 255.255.255.255 broadcast */
     bool reconnecting_direct;        /* True when performing targeted unicast recovery to last_known_ps5_ip */
+    bool pkt_has_torque;             /* Set per-packet if source provided actual torque Nm */
+    bool pkt_has_power;              /* Set per-packet if source provided actual power kW */
     gt7_heartbeat_mode_t heartbeat_mode; /* AUTO, PKT_C, PKT_TILDE, PKT_A, PKT_B */
     char active_hb_char;     /* 'A', 'B', '~', 'C' currently being sent */
     int active_theme_hint;   /* UI theme hint (e.g. 2 for EV) */

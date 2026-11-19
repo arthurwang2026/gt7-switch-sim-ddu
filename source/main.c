@@ -286,9 +286,9 @@ int main(int argc, char *argv[]) {
             prev_fullscreen = ui.fullscreen_canvas;
         }
 
-        if (strcmp(prev_ip, client.ps5_ip) != 0 || prev_auto != client.auto_detect) {
+        if (prev_auto != client.auto_detect || (!client.auto_detect && strcmp(prev_ip, client.ps5_ip) != 0)) {
             save_ip_config(&client);
-            strncpy(prev_ip, client.ps5_ip, sizeof(prev_ip));
+            snprintf(prev_ip, sizeof(prev_ip), "%s", client.ps5_ip);
             prev_auto = client.auto_detect;
         }
 

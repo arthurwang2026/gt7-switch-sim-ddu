@@ -1,5 +1,5 @@
 # GT7 & PC SimHub Switch Sim-DDU Pro (Nintendo Switch Sim Racing & EV Cockpit DDU)
-**Version / 版本號: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 Dual-Engine & True OLED Black Edition)**  
+**Version / 版本號: `_aw_1.11.19.1305` (PS5 GT7 + PC SimHub / Forza Horizon 6 Dual-Engine & True OLED Black Edition)**  
 **Author / 開發者**: [ArthurWang](https://github.com/arthurwang2026) | **Repository**: [gt7-switch-sim-ddu](https://github.com/arthurwang2026/gt7-switch-sim-ddu)
 
 <p align="center">
@@ -184,7 +184,7 @@ Ein natives Homebrew Sim-Racing Dashboard Display Unit (`.nro`) speziell für di
 
 ## 📦 Download & Release (`gt7_switch_hud.nro`)
 
-- 🌐 **GitHub Releases**: [Latest Release (v1.11.06.1220)](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest) • [All Releases](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases)
+- 🌐 **GitHub Releases**: [Latest Release (v1.11.19.1305)](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest) • [All Releases](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases)
 - 📦 **Direct .NRO Download**: [gt7_switch_hud.nro (Latest)](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro)
 - 📂 **Install Path on SD Card**: `/switch/gt7_hud/gt7_switch_hud.nro`
 

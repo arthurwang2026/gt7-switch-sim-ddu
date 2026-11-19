@@ -1,5 +1,5 @@
 # GT7 & PC SimHub Switch Sim-DDU Pro (繁體中文)
-**版本號: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 雙遙測引擎 & True OLED Black 旗艦版)**  
+**版本號: `_aw_1.11.19.1305` (PS5 GT7 + PC SimHub / Forza Horizon 6 雙遙測引擎 & True OLED Black 旗艦版)**  
 **開發者 / 作者**: [ArthurWang](https://github.com/arthurwang2026) | **原始碼儲存庫**: [gt7-switch-sim-ddu](https://github.com/arthurwang2026/gt7-switch-sim-ddu)
 
 <p align="center">

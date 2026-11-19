@@ -1,5 +1,5 @@
 # GT7 & PC SimHub Switch Sim-DDU Pro (Deutsch)
-**Version: `_aw_1.11.06.1220` (PS5 GT7 + PC SimHub / Forza Horizon 6 Dual-Engine & True OLED Black Edition)**  
+**Version: `_aw_1.11.19.1305` (PS5 GT7 + PC SimHub / Forza Horizon 6 Dual-Engine & True OLED Black Edition)**  
 **Autor**: [ArthurWang](https://github.com/arthurwang2026) | **Repository**: [gt7-switch-sim-ddu](https://github.com/arthurwang2026/gt7-switch-sim-ddu)
 
 <p align="center">

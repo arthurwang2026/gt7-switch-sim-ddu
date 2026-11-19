@@ -12,6 +12,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#ifdef __SWITCH__
+#include <switch.h>
+#else
+#include <ifaddrs.h>
+#include <net/if.h>
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -208,11 +214,65 @@ bool gt7_decrypt_packet(const uint8_t *raw, size_t len, uint8_t *decrypted_out) 
     return false;
 }
 
-/* Detect local Wi-Fi IP & /24 subnet prefix using a non-transmitting UDP routing probe */
-static void detect_local_subnet(gt7_client_t *client) {
-    strncpy(client->local_ip, "192.168.1.2", sizeof(client->local_ip) - 1);
-    strncpy(client->subnet_prefix, "192.168.1", sizeof(client->subnet_prefix) - 1);
+/* Populate local_ip, /24 subnet_prefix, and local_host_octet from an IPv4 in_addr */
+static void set_local_ip_from_in_addr(gt7_client_t *client, struct in_addr addr) {
+    char ip_buf[INET_ADDRSTRLEN];
+    if (!inet_ntop(AF_INET, &addr, ip_buf, sizeof(ip_buf))) {
+        return;
+    }
+    snprintf(client->local_ip, sizeof(client->local_ip), "%s", ip_buf);
+    snprintf(client->subnet_prefix, sizeof(client->subnet_prefix), "%s", ip_buf);
+    char *last_dot = strrchr(client->subnet_prefix, '.');
+    if (last_dot) {
+        client->local_host_octet = (uint8_t)atoi(last_dot + 1);
+        *last_dot = '\0';
+    }
+}
 
+/* Detect local Wi-Fi IP & /24 subnet prefix cleanly, working even on offline LAN routers */
+static void detect_local_subnet(gt7_client_t *client) {
+    snprintf(client->local_ip, sizeof(client->local_ip), "192.168.1.2");
+    snprintf(client->subnet_prefix, sizeof(client->subnet_prefix), "192.168.1");
+    client->local_host_octet = 0;
+
+    bool found = false;
+
+#ifdef __SWITCH__
+    if (R_SUCCEEDED(nifmInitialize(NifmServiceType_User))) {
+        u32 ip_u32 = 0;
+        if (R_SUCCEEDED(nifmGetCurrentIpAddress(&ip_u32)) && ip_u32 != 0) {
+            struct in_addr in;
+            memcpy(&in, &ip_u32, sizeof(in));
+            set_local_ip_from_in_addr(client, in);
+            found = true;
+        }
+        nifmExit();
+    }
+#else
+    struct ifaddrs *ifap = NULL;
+    if (getifaddrs(&ifap) == 0 && ifap) {
+        for (struct ifaddrs *ifa = ifap; ifa != NULL; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) continue;
+            if ((ifa->ifa_flags & IFF_LOOPBACK) || !(ifa->ifa_flags & IFF_UP)) continue;
+            struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
+            uint32_t host_order = ntohl(sin->sin_addr.s_addr);
+            /* Skip APIPA link-local 169.254.0.0/16 and loopback 127.0.0.0/8 */
+            if ((host_order & 0xFFFF0000U) == 0xA9FE0000U || (host_order & 0xFF000000U) == 0x7F000000U) {
+                continue;
+            }
+            set_local_ip_from_in_addr(client, sin->sin_addr);
+            found = true;
+            if (ifa->ifa_flags & IFF_RUNNING) {
+                break;
+            }
+        }
+        freeifaddrs(ifap);
+    }
+#endif
+
+    if (found) return;
+
+    /* Fallback: non-transmitting UDP routing probe for platforms/setups with a default route */
     int probe = socket(AF_INET, SOCK_DGRAM, 0);
     if (probe < 0) return;
 
@@ -226,20 +286,46 @@ static void detect_local_subnet(gt7_client_t *client) {
         struct sockaddr_in local;
         socklen_t len = sizeof(local);
         if (getsockname(probe, (struct sockaddr *)&local, &len) == 0) {
-            if (inet_ntop(AF_INET, &local.sin_addr, client->local_ip, sizeof(client->local_ip))) {
-                strncpy(client->subnet_prefix, client->local_ip, sizeof(client->subnet_prefix) - 1);
-                client->subnet_prefix[sizeof(client->subnet_prefix) - 1] = '\0';
-                char *last_dot = strrchr(client->subnet_prefix, '.');
-                if (last_dot) {
-                    *last_dot = '\0';
-                }
-            }
+            set_local_ip_from_in_addr(client, local.sin_addr);
         }
     }
     close(probe);
 }
 
+/* Shared helper to create, configure non-blocking options, and bind an IPv4 UDP socket */
+static int create_bound_udp_socket(uint16_t port, bool enable_broadcast, bool close_on_bind_fail) {
+    int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (fd < 0) {
+        return -1;
+    }
+
+    int reuse = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    if (enable_broadcast) {
+        int broadcast = 1;
+        setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
+    }
+
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+
+    struct sockaddr_in bind_addr;
+    memset(&bind_addr, 0, sizeof(bind_addr));
+    bind_addr.sin_family = AF_INET;
+    bind_addr.sin_port = htons(port);
+    bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    if (bind(fd, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0 && close_on_bind_fail) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
 bool gt7_init(gt7_client_t *client, gt7_state_t *state, const char *ps5_ip) {
+    if (!client || !state) return false;
     memset(client, 0, sizeof(*client));
     memset(state, 0, sizeof(*state));
     client->sock_fd = -1;
@@ -257,73 +343,19 @@ bool gt7_init(gt7_client_t *client, gt7_state_t *state, const char *ps5_ip) {
     /* Default to AUTO-DETECT unless a specific manual IP was provided */
     if (!ps5_ip || ps5_ip[0] == '\0' || strcasecmp(ps5_ip, "AUTO") == 0) {
         client->auto_detect = true;
-        strncpy(client->ps5_ip, "AUTO", sizeof(client->ps5_ip) - 1);
+        snprintf(client->ps5_ip, sizeof(client->ps5_ip), "AUTO");
     } else {
         gt7_set_ip(client, ps5_ip);
     }
 
-    client->sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    client->sock_fd = create_bound_udp_socket(GT7_RECV_PORT, true, false);
     if (client->sock_fd < 0) {
         return false;
     }
 
-    int reuse = 1;
-    setsockopt(client->sock_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-    int broadcast = 1;
-    setsockopt(client->sock_fd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
-
-    int flags = fcntl(client->sock_fd, F_GETFL, 0);
-    if (flags >= 0) {
-        fcntl(client->sock_fd, F_SETFL, flags | O_NONBLOCK);
-    }
-
-    struct sockaddr_in bind_addr;
-    memset(&bind_addr, 0, sizeof(bind_addr));
-    bind_addr.sin_family = AF_INET;
-    bind_addr.sin_port = htons(GT7_RECV_PORT);
-    bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    if (bind(client->sock_fd, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
-        /* Socket remains usable for outbound heartbeats */
-    }
-
-    /* Also open secondary non-blocking UDP socket on port 20777 for PC SimHub / Codemasters / Forza UDP */
-    client->simhub_sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (client->simhub_sock_fd >= 0) {
-        setsockopt(client->simhub_sock_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-        int sh_flags = fcntl(client->simhub_sock_fd, F_GETFL, 0);
-        if (sh_flags >= 0) {
-            fcntl(client->simhub_sock_fd, F_SETFL, sh_flags | O_NONBLOCK);
-        }
-        struct sockaddr_in sh_bind;
-        memset(&sh_bind, 0, sizeof(sh_bind));
-        sh_bind.sin_family = AF_INET;
-        sh_bind.sin_port = htons(SIMHUB_RECV_PORT);
-        sh_bind.sin_addr.s_addr = htonl(INADDR_ANY);
-        if (bind(client->simhub_sock_fd, (struct sockaddr *)&sh_bind, sizeof(sh_bind)) < 0) {
-            close(client->simhub_sock_fd);
-            client->simhub_sock_fd = -1;
-        }
-    }
-
-    /* Also open tertiary non-blocking UDP socket on port 8000 (Forza Horizon / Motorsport default Data Out port) */
-    client->forza_sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (client->forza_sock_fd >= 0) {
-        setsockopt(client->forza_sock_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-        int fz_flags = fcntl(client->forza_sock_fd, F_GETFL, 0);
-        if (fz_flags >= 0) {
-            fcntl(client->forza_sock_fd, F_SETFL, fz_flags | O_NONBLOCK);
-        }
-        struct sockaddr_in fz_bind;
-        memset(&fz_bind, 0, sizeof(fz_bind));
-        fz_bind.sin_family = AF_INET;
-        fz_bind.sin_port = htons(FORZA_RECV_PORT);
-        fz_bind.sin_addr.s_addr = htonl(INADDR_ANY);
-        if (bind(client->forza_sock_fd, (struct sockaddr *)&fz_bind, sizeof(fz_bind)) < 0) {
-            close(client->forza_sock_fd);
-            client->forza_sock_fd = -1;
-        }
-    }
+    /* Secondary & tertiary non-blocking UDP sockets for PC SimHub (:20777) & Forza Data Out (:8000) */
+    client->simhub_sock_fd = create_bound_udp_socket(SIMHUB_RECV_PORT, false, true);
+    client->forza_sock_fd  = create_bound_udp_socket(FORZA_RECV_PORT, false, true);
 
     return true;
 }
@@ -335,6 +367,7 @@ void gt7_set_ip(gt7_client_t *client, const char *ps5_ip) {
         return;
     }
     client->auto_detect = false;
+    client->reconnecting_direct = false;
     snprintf(client->ps5_ip, sizeof(client->ps5_ip), "%s", ps5_ip);
     snprintf(client->last_known_ps5_ip, sizeof(client->last_known_ps5_ip), "%s", ps5_ip);
 }
@@ -345,32 +378,18 @@ void gt7_recycle_socket(gt7_client_t *client) {
         close(client->sock_fd);
         client->sock_fd = -1;
     }
-    client->sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (client->sock_fd >= 0) {
-        int reuse = 1;
-        setsockopt(client->sock_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-        int broadcast = 1;
-        setsockopt(client->sock_fd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
-        int flags = fcntl(client->sock_fd, F_GETFL, 0);
-        if (flags >= 0) {
-            fcntl(client->sock_fd, F_SETFL, flags | O_NONBLOCK);
-        }
-        struct sockaddr_in bind_addr;
-        memset(&bind_addr, 0, sizeof(bind_addr));
-        bind_addr.sin_family = AF_INET;
-        bind_addr.sin_port = htons(GT7_RECV_PORT);
-        bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        if (bind(client->sock_fd, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
-            /* Socket remains usable for outbound heartbeats */
-        }
-    }
+    client->sock_fd = create_bound_udp_socket(GT7_RECV_PORT, true, false);
 }
 
 void gt7_set_auto_detect(gt7_client_t *client, gt7_state_t *state) {
     detect_local_subnet(client);
     client->auto_detect = true;
     client->scan_cursor = 1;
-    strncpy(client->ps5_ip, "AUTO", sizeof(client->ps5_ip) - 1);
+    client->reconnecting_direct = false;
+    client->last_ps5_seen_ms = 0;
+    client->hb_fail_count = 0;
+    snprintf(client->ps5_ip, sizeof(client->ps5_ip), "AUTO");
+    client->last_known_ps5_ip[0] = '\0';
     if (state) {
         state->connected = false;
     }
@@ -398,11 +417,18 @@ const char *gt7_heartbeat_mode_name(gt7_heartbeat_mode_t mode) {
     }
 }
 
+static void send_hb_to_ip(int sock_fd, struct sockaddr_in *dest, const char *ip_str, const char *msg) {
+    if (inet_pton(AF_INET, ip_str, &dest->sin_addr) == 1) {
+        sendto(sock_fd, msg, 1, 0, (struct sockaddr *)dest, sizeof(*dest));
+    }
+}
+
 static void gt7_send_heartbeat(gt7_client_t *client, bool connected, uint32_t now_ms) {
     if (client->sock_fd < 0) return;
     if (client->heartbeat_mode == GT7_HEARTBEAT_SIMHUB) {
         /* PC SimHub pushes UDP directly to Switch/Host (:20777 or :33740), no PS5 heartbeat needed */
         client->active_hb_char = 'S';
+        client->reconnecting_direct = false;
         return;
     }
 
@@ -447,49 +473,200 @@ static void gt7_send_heartbeat(gt7_client_t *client, bool connected, uint32_t no
     uint32_t silence_ms = (client->last_ps5_seen_ms > 0 && now_ms >= client->last_ps5_seen_ms)
                           ? (now_ms - client->last_ps5_seen_ms) : 999999;
 
-    /* 1. Fast targeted recovery: If connected OR if we have a known target IP within 15 seconds of silence */
+    /* 1. Fast targeted recovery: Connected OR known IP (Manual mode or < 15s grace window in AUTO) */
     if (connected || (has_direct_ip && (!client->auto_detect || silence_ms < 15000))) {
         client->reconnecting_direct = !connected;
-        if (inet_pton(AF_INET, client->ps5_ip, &dest.sin_addr) == 1) {
-            sendto(client->sock_fd, heartbeat_msg, 1, 0,
-                   (struct sockaddr *)&dest, sizeof(dest));
-        }
-        /* Never flood the network or do subnet sweeps when in direct mode / recent disconnect! */
+        send_hb_to_ip(client->sock_fd, &dest, client->ps5_ip, heartbeat_msg);
         return;
     }
 
-    /* 2. Fallback Subnet Discovery (gentle, throttled to max 3~4 pkts/s total) */
+    /* 2. Gentle Fallback Subnet Discovery (balanced speed + router-safe rate <= ~18 pkts/s) */
     client->reconnecting_direct = false;
     if (client->auto_detect && !connected) {
-        /* Always keep trying the last known IP as top priority */
-        if (has_last_ip && inet_pton(AF_INET, client->last_known_ps5_ip, &dest.sin_addr) == 1) {
-            sendto(client->sock_fd, heartbeat_msg, 1, 0,
-                   (struct sockaddr *)&dest, sizeof(dest));
+        /* Always keep trying the last known PS5 IP first */
+        if (has_last_ip) {
+            send_hb_to_ip(client->sock_fd, &dest, client->last_known_ps5_ip, heartbeat_msg);
         }
 
-        /* Directed subnet broadcast e.g. 192.168.1.255, throttled to once every 2500ms */
-        if (now_ms - client->last_bcast_ms >= 2500) {
-            client->last_bcast_ms = now_ms;
+        /* Directed subnet broadcast e.g. 192.168.1.255, once at start then every 2500ms */
+        if (client->last_bcast_ms == 0 || (now_ms - client->last_bcast_ms >= 2500)) {
+            client->last_bcast_ms = now_ms ? now_ms : 1;
             char bcast_ip[64];
             snprintf(bcast_ip, sizeof(bcast_ip), "%s.255", client->subnet_prefix);
-            if (inet_pton(AF_INET, bcast_ip, &dest.sin_addr) == 1) {
-                sendto(client->sock_fd, heartbeat_msg, 1, 0,
-                       (struct sockaddr *)&dest, sizeof(dest));
-            }
+            send_hb_to_ip(client->sock_fd, &dest, bcast_ip, heartbeat_msg);
         }
 
-        /* Probe ONLY 1 host per pulse (max 2~4 hosts/sec, NEVER 32 hosts flood!) */
-        char target[64];
-        snprintf(target, sizeof(target), "%s.%u", client->subnet_prefix, client->scan_cursor);
-        client->scan_cursor++;
-        if (client->scan_cursor == 0 || client->scan_cursor >= 255) {
-            client->scan_cursor = 1;
+        /* Global limited broadcast 255.255.255.255, once at start then every 4000ms */
+        if (client->last_bcast_global_ms == 0 || (now_ms - client->last_bcast_global_ms >= 4000)) {
+            client->last_bcast_global_ms = now_ms ? now_ms : 1;
+            dest.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+            sendto(client->sock_fd, heartbeat_msg, 1, 0, (struct sockaddr *)&dest, sizeof(dest));
         }
-        if (inet_pton(AF_INET, target, &dest.sin_addr) == 1) {
-            sendto(client->sock_fd, heartbeat_msg, 1, 0,
-                   (struct sockaddr *)&dest, sizeof(dest));
+
+        /* Probe 4 unicast hosts per 250ms tick (~16 hosts/sec -> /24 scan in ~16s, well under DoS limits) */
+        for (int s = 0; s < 4; ++s) {
+            if (client->scan_cursor == 0 || client->scan_cursor >= 255) {
+                client->scan_cursor = 1;
+            }
+            if (client->scan_cursor == client->local_host_octet) {
+                client->scan_cursor++;
+                if (client->scan_cursor >= 255) client->scan_cursor = 1;
+            }
+            char target[64];
+            snprintf(target, sizeof(target), "%s.%u", client->subnet_prefix, client->scan_cursor);
+            client->scan_cursor++;
+            send_hb_to_ip(client->sock_fd, &dest, target, heartbeat_msg);
         }
     }
+}
+
+/* Shared helper: distribute engine torque (Nm) across FL/FR/RL/RR by drivetrain & front steering bias */
+static void distribute_drivetrain_torque_nm(gt7_state_t *state, float torque_nm, int drivetrain_mode) {
+    float t_mag = fabsf(torque_nm);
+    state->engine_torque_norm = (t_mag > 1200.0f) ? 1.0f : (t_mag / 800.0f);
+    float yaw_steer_bias = state->steer_angle_fl_deg / 35.0f;
+    if (drivetrain_mode == 0) {
+        /* FWD: 100% front */
+        state->torque_vector_nm[0] = torque_nm * 0.50f * (1.0f - yaw_steer_bias * 0.20f);
+        state->torque_vector_nm[1] = torque_nm * 0.50f * (1.0f + yaw_steer_bias * 0.20f);
+        state->torque_vector_nm[2] = 0.0f;
+        state->torque_vector_nm[3] = 0.0f;
+    } else if (drivetrain_mode == 1) {
+        /* RWD: 100% rear */
+        state->torque_vector_nm[0] = 0.0f;
+        state->torque_vector_nm[1] = 0.0f;
+        state->torque_vector_nm[2] = torque_nm * 0.50f * (1.0f - yaw_steer_bias * 0.25f);
+        state->torque_vector_nm[3] = torque_nm * 0.50f * (1.0f + yaw_steer_bias * 0.25f);
+    } else {
+        /* AWD: 40% front / 60% rear nominal */
+        state->torque_vector_nm[0] = torque_nm * 0.40f * 0.50f * (1.0f - yaw_steer_bias * 0.20f);
+        state->torque_vector_nm[1] = torque_nm * 0.40f * 0.50f * (1.0f + yaw_steer_bias * 0.20f);
+        state->torque_vector_nm[2] = torque_nm * 0.60f * 0.50f * (1.0f - yaw_steer_bias * 0.25f);
+        state->torque_vector_nm[3] = torque_nm * 0.60f * 0.50f * (1.0f + yaw_steer_bias * 0.25f);
+    }
+}
+
+/* Shared helper: detect lap transitions, update fuel burn, best lap, and ring-buffer lap history */
+static void update_lap_transition_and_history(gt7_client_t *client, gt7_state_t *state, uint32_t now_ms,
+                                              float default_fuel_burn, bool update_best_if_better) {
+    if (state->current_lap != client->tracked_lap) {
+        if (client->tracked_lap > 0 && state->last_lap_ms > 0) {
+            float used = (client->lap_start_fuel > state->fuel_pct + 0.05f)
+                         ? (client->lap_start_fuel - state->fuel_pct) : default_fuel_burn;
+            state->fuel_burn_per_lap = used;
+            if (update_best_if_better && (state->best_lap_ms <= 0 || state->last_lap_ms < state->best_lap_ms)) {
+                state->best_lap_ms = state->last_lap_ms;
+            }
+
+            int idx = state->lap_history_count < GT7_MAX_LAPS ? state->lap_history_count++ : (GT7_MAX_LAPS - 1);
+            if (state->lap_history_count == GT7_MAX_LAPS) {
+                memmove(&state->lap_history[0], &state->lap_history[1], sizeof(gt7_lap_record_t) * (GT7_MAX_LAPS - 1));
+            }
+            state->lap_history[idx].lap_num = client->tracked_lap;
+            state->lap_history[idx].time_ms = state->last_lap_ms;
+            state->lap_history[idx].s1_ms   = (int32_t)(state->last_lap_ms * 0.335f);
+            state->lap_history[idx].s2_ms   = (int32_t)(state->last_lap_ms * 0.425f);
+            state->lap_history[idx].s3_ms   = state->last_lap_ms - state->lap_history[idx].s1_ms - state->lap_history[idx].s2_ms;
+            state->lap_history[idx].fuel_used = used;
+            state->lap_history[idx].top_speed_kmh = client->lap_top_speed;
+            state->track_is_closed = true; /* Full lap completed, close the circuit loop cleanly */
+        }
+        client->tracked_lap = state->current_lap;
+        client->lap_start_ms = now_ms;
+        client->lap_start_fuel = state->fuel_pct;
+        client->lap_top_speed = state->speed_kmh;
+    }
+}
+
+/* Shared helper: sample 2D GPS track coordinates with distance throttling and teleport protection */
+static void record_track_sample(gt7_client_t *client, gt7_state_t *state, uint32_t now_ms, bool require_nonzero_pos) {
+    if (state->demo_mode || state->speed_kmh <= 8.0f) return;
+    if (require_nonzero_pos && fabsf(state->pos_x) <= 0.1f && fabsf(state->pos_z) <= 0.1f) return;
+
+    float dx = client->has_sample_pos ? (state->pos_x - client->last_sample_x) : 999.0f;
+    float dz = client->has_sample_pos ? (state->pos_z - client->last_sample_z) : 999.0f;
+    float dist_sq = dx * dx + dz * dz;
+
+    if (!client->has_sample_pos || dist_sq >= 225.0f || (now_ms - client->last_track_sample_ms >= 400 && dist_sq >= 16.0f)) {
+        bool is_teleport = (client->has_sample_pos && dist_sq > 62500.0f); /* > 250m sudden jump */
+        int h = state->track_pt_head;
+        state->track_pts[h].x = state->pos_x;
+        state->track_pts[h].z = state->pos_z;
+        state->track_pts[h].speed_kmh = state->speed_kmh;
+        state->track_pts[h].pedal_state = (state->brake_pct > 20.0f) ? 2 : ((state->throttle_pct > 50.0f) ? 1 : 0);
+        state->track_pts[h].segment_break = is_teleport ? 1 : 0;
+
+        state->track_pt_head = (h + 1) % GT7_TRACK_PTS;
+        if (state->track_pt_count < GT7_TRACK_PTS) {
+            state->track_pt_count++;
+        }
+
+        if (!is_teleport) {
+            if (state->pos_x < state->track_min_x) state->track_min_x = state->pos_x;
+            if (state->pos_x > state->track_max_x) state->track_max_x = state->pos_x;
+            if (state->pos_z < state->track_min_z) state->track_min_z = state->pos_z;
+            if (state->pos_z > state->track_max_z) state->track_max_z = state->pos_z;
+        }
+
+        client->last_sample_x = state->pos_x;
+        client->last_sample_z = state->pos_z;
+        client->has_sample_pos = true;
+        client->last_track_sample_ms = now_ms;
+    }
+}
+
+/* Shared helper: append current pedal and speed frame into graph ring buffer */
+static void push_pedal_speed_trace(gt7_state_t *state) {
+    state->trace_throttle[state->trace_head] = state->throttle_pct;
+    state->trace_brake[state->trace_head]    = state->brake_pct;
+    state->trace_speed[state->trace_head]    = state->speed_kmh;
+    state->trace_head = (state->trace_head + 1) % GT7_TRACE_LEN;
+}
+
+/* Shared helper: compute aero downforce & fallback EV metrics only when real source values are absent */
+static void apply_aero_and_ev_synthesis(gt7_state_t *state, bool has_real_power, bool has_real_torque) {
+    float spd_norm = state->speed_kmh / 300.0f;
+    state->downforce_front_kg = 210.0f * spd_norm * spd_norm;
+    state->downforce_rear_kg  = 375.0f * spd_norm * spd_norm;
+    if (state->trans_oil_temp <= 1.0f) {
+        state->trans_oil_temp = (state->oil_temp > 20.0f) ? (state->oil_temp - 4.0f) : 95.0f;
+    }
+
+    if (state->battery_soc_pct <= 0.1f) {
+        state->battery_soc_pct = (state->fuel_pct > 1.0f) ? state->fuel_pct : 78.0f;
+    }
+    if (!has_real_power && fabsf(state->energy_recovery_kw) <= 0.01f) {
+        state->energy_recovery_kw = (state->throttle_pct * 4.2f) - (state->brake_pct * 2.6f);
+    }
+    state->energy_recovery_avail = true;
+
+    if (!has_real_torque) {
+        state->engine_torque_norm = (state->throttle_pct - state->brake_pct * 0.6f) / 100.0f;
+        float base_nm = (state->throttle_pct * 5.2f) - (state->brake_pct * 3.0f);
+        float yaw_bias = state->steer_angle_fl_deg / 32.0f;
+        state->torque_vector_nm[0] = base_nm * (0.38f - yaw_bias * 0.10f);
+        state->torque_vector_nm[1] = base_nm * (0.38f + yaw_bias * 0.10f);
+        state->torque_vector_nm[2] = base_nm * (0.62f - yaw_bias * 0.16f);
+        state->torque_vector_nm[3] = base_nm * (0.62f + yaw_bias * 0.16f);
+    }
+}
+
+static void apply_simhub_tire_temp(gt7_state_t *state, int wheel, float fval) {
+    state->tire_temp[wheel] = (fval > 135.0f) ? ((fval - 32.0f) * 5.0f / 9.0f) : fval;
+}
+
+static void apply_simhub_wheel_slip(gt7_state_t *state, int wheel, const char *key, float fval) {
+    float s = fabsf(fval);
+    if (strncasecmp(key, "TireSlipRatio", 13) == 0 || strncasecmp(key, "TireCombinedSlip", 16) == 0) {
+        s = (s <= 1.0f) ? (s * 0.10f) : (0.12f + (s - 1.0f) * 0.60f);
+    } else if (s > 1.5f) {
+        s /= 100.0f;
+    }
+    state->tire_slip_ratio[wheel] = (s > 1.0f) ? 1.0f : s;
+}
+
+static void apply_simhub_wheel_susp(gt7_state_t *state, int wheel, float fval) {
+    state->susp_height[wheel] = (fval >= 0.0f && fval <= 1.2f) ? (25.0f + fval * 65.0f) : fval;
 }
 
 static void gt7_parse_decrypted(gt7_client_t *client, gt7_state_t *state, const uint8_t *d, size_t len, uint32_t now_ms) {
@@ -762,30 +939,7 @@ static void gt7_parse_decrypted(gt7_client_t *client, gt7_state_t *state, const 
     client->prev_yaw   = state->yaw;
     client->prev_packet_ms = now_ms;
 
-    /* Track current lap elapsed time, sectors & lap history */
-    if (state->current_lap != client->tracked_lap) {
-        if (client->tracked_lap > 0 && state->last_lap_ms > 0) {
-            float used = (client->lap_start_fuel > state->fuel_pct) ? (client->lap_start_fuel - state->fuel_pct) : 2.8f;
-            state->fuel_burn_per_lap = used;
-
-            int idx = state->lap_history_count < GT7_MAX_LAPS ? state->lap_history_count++ : (GT7_MAX_LAPS - 1);
-            if (state->lap_history_count == GT7_MAX_LAPS) {
-                memmove(&state->lap_history[0], &state->lap_history[1], sizeof(gt7_lap_record_t) * (GT7_MAX_LAPS - 1));
-            }
-            state->lap_history[idx].lap_num = client->tracked_lap;
-            state->lap_history[idx].time_ms = state->last_lap_ms;
-            state->lap_history[idx].s1_ms   = (int32_t)(state->last_lap_ms * 0.335f);
-            state->lap_history[idx].s2_ms   = (int32_t)(state->last_lap_ms * 0.425f);
-            state->lap_history[idx].s3_ms   = state->last_lap_ms - state->lap_history[idx].s1_ms - state->lap_history[idx].s2_ms;
-            state->lap_history[idx].fuel_used = used;
-            state->lap_history[idx].top_speed_kmh = client->lap_top_speed;
-            state->track_is_closed = true; /* Full lap completed, close the circuit loop cleanly! */
-        }
-        client->tracked_lap = state->current_lap;
-        client->lap_start_ms = now_ms;
-        client->lap_start_fuel = state->fuel_pct;
-        client->lap_top_speed = state->speed_kmh;
-    }
+    update_lap_transition_and_history(client, state, now_ms, 2.8f, false);
     if (state->current_lap > 0 && !(state->flags & GT7_FLAG_PAUSED)) {
         state->current_lap_ms = (int32_t)(now_ms - client->lap_start_ms);
         if (state->best_lap_ms > 0) {
@@ -795,69 +949,13 @@ static void gt7_parse_decrypted(gt7_client_t *client, gt7_state_t *state, const 
         }
     }
 
-    /* Record 2D GPS Circuit coordinate with distance-based threshold and teleport safety */
-    if (!state->demo_mode && state->speed_kmh > 8.0f) {
-        float dx = client->has_sample_pos ? (state->pos_x - client->last_sample_x) : 999.0f;
-        float dz = client->has_sample_pos ? (state->pos_z - client->last_sample_z) : 999.0f;
-        float dist_sq = dx * dx + dz * dz;
+    record_track_sample(client, state, now_ms, false);
+    push_pedal_speed_trace(state);
 
-        /* Sample if car moved >= 15m (dist_sq >= 225.0f) or timeout > 400ms while moving */
-        if (!client->has_sample_pos || dist_sq >= 225.0f || (now_ms - client->last_track_sample_ms >= 400 && dist_sq >= 16.0f)) {
-            bool is_teleport = (client->has_sample_pos && dist_sq > 62500.0f); /* > 250m sudden jump */
-            int h = state->track_pt_head;
-            state->track_pts[h].x = state->pos_x;
-            state->track_pts[h].z = state->pos_z;
-            state->track_pts[h].speed_kmh = state->speed_kmh;
-            state->track_pts[h].pedal_state = (state->brake_pct > 20.0f) ? 2 : ((state->throttle_pct > 50.0f) ? 1 : 0);
-            state->track_pts[h].segment_break = is_teleport ? 1 : 0;
-
-            state->track_pt_head = (h + 1) % GT7_TRACK_PTS;
-            if (state->track_pt_count < GT7_TRACK_PTS) {
-                state->track_pt_count++;
-            }
-
-            if (!is_teleport) {
-                if (state->pos_x < state->track_min_x) state->track_min_x = state->pos_x;
-                if (state->pos_x > state->track_max_x) state->track_max_x = state->pos_x;
-                if (state->pos_z < state->track_min_z) state->track_min_z = state->pos_z;
-                if (state->pos_z > state->track_max_z) state->track_max_z = state->pos_z;
-            }
-
-            client->last_sample_x = state->pos_x;
-            client->last_sample_z = state->pos_z;
-            client->has_sample_pos = true;
-            client->last_track_sample_ms = now_ms;
-        }
-    }
-
-    /* Update pedal & speed trace buffer */
-    state->trace_throttle[state->trace_head] = state->throttle_pct;
-    state->trace_brake[state->trace_head]    = state->brake_pct;
-    state->trace_speed[state->trace_head]    = state->speed_kmh;
-    state->trace_head = (state->trace_head + 1) % GT7_TRACE_LEN;
-
-    /* Aerodynamic downforce from velocity: F_down = k * v^2 */
-    float spd_norm = state->speed_kmh / 300.0f;
-    state->downforce_front_kg = 210.0f * spd_norm * spd_norm;
-    state->downforce_rear_kg  = 375.0f * spd_norm * spd_norm;
-    state->trans_oil_temp     = (state->oil_temp > 20.0f) ? (state->oil_temp - 4.0f) : 95.0f;
-
-    /* EV & Hybrid live power & torque synthesis when GT7 is not sending Packet ~ */
-    if (state->battery_soc_pct <= 0.1f) {
-        state->battery_soc_pct = (state->fuel_pct > 1.0f) ? state->fuel_pct : 78.0f;
-    }
-    if (fabsf(state->energy_recovery_kw) <= 0.01f) {
-        state->energy_recovery_kw = (state->throttle_pct * 4.2f) - (state->brake_pct * 2.6f);
-    }
-    state->energy_recovery_avail = true;
-    if (fabsf(state->torque_vector_nm[0]) < 0.001f && fabsf(state->torque_vector_nm[2]) < 0.001f) {
-        float base_nm = (state->throttle_pct * 5.2f) - (state->brake_pct * 3.0f);
-        float yaw_bias = state->steer_angle_fl_deg / 32.0f;
-        state->torque_vector_nm[0] = base_nm * (0.38f - yaw_bias * 0.10f);
-        state->torque_vector_nm[1] = base_nm * (0.38f + yaw_bias * 0.10f);
-        state->torque_vector_nm[2] = base_nm * (0.62f - yaw_bias * 0.16f);
-        state->torque_vector_nm[3] = base_nm * (0.62f + yaw_bias * 0.16f);
-    }
+    bool gt7_has_power  = state->has_packet_tilde || (fabsf(state->energy_recovery_kw) > 0.01f);
+    bool gt7_has_torque = state->has_packet_tilde ||
+                          (fabsf(state->torque_vector_nm[0]) >= 0.001f || fabsf(state->torque_vector_nm[2]) >= 0.001f);
+    apply_aero_and_ev_synthesis(state, gt7_has_power, gt7_has_torque);
 }
 
 /* =========================================================================
@@ -968,33 +1066,7 @@ static void simhub_post_process(gt7_client_t *client, gt7_state_t *state, uint32
     if (state->current_lap <= 0) state->current_lap = 1;
     if (state->race_position <= 0) state->race_position = 1;
     if (state->total_cars <= 0) state->total_cars = 20;
-    if (state->current_lap != client->tracked_lap) {
-        if (client->tracked_lap > 0 && state->last_lap_ms > 0) {
-            float used = (client->lap_start_fuel > state->fuel_pct + 0.05f)
-                         ? (client->lap_start_fuel - state->fuel_pct) : 2.6f;
-            state->fuel_burn_per_lap = used;
-            if (state->best_lap_ms <= 0 || state->last_lap_ms < state->best_lap_ms) {
-                state->best_lap_ms = state->last_lap_ms;
-            }
-
-            int idx = state->lap_history_count < GT7_MAX_LAPS ? state->lap_history_count++ : (GT7_MAX_LAPS - 1);
-            if (state->lap_history_count == GT7_MAX_LAPS) {
-                memmove(&state->lap_history[0], &state->lap_history[1], sizeof(gt7_lap_record_t) * (GT7_MAX_LAPS - 1));
-            }
-            state->lap_history[idx].lap_num = client->tracked_lap;
-            state->lap_history[idx].time_ms = state->last_lap_ms;
-            state->lap_history[idx].s1_ms   = (int32_t)(state->last_lap_ms * 0.335f);
-            state->lap_history[idx].s2_ms   = (int32_t)(state->last_lap_ms * 0.425f);
-            state->lap_history[idx].s3_ms   = state->last_lap_ms - state->lap_history[idx].s1_ms - state->lap_history[idx].s2_ms;
-            state->lap_history[idx].fuel_used = used;
-            state->lap_history[idx].top_speed_kmh = client->lap_top_speed;
-            state->track_is_closed = true;
-        }
-        client->tracked_lap = state->current_lap;
-        client->lap_start_ms = now_ms;
-        client->lap_start_fuel = state->fuel_pct;
-        client->lap_top_speed = state->speed_kmh;
-    }
+    update_lap_transition_and_history(client, state, now_ms, 2.6f, true);
 
     if (state->current_lap_ms <= 0 && client->lap_start_ms > 0 && now_ms >= client->lap_start_ms) {
         state->current_lap_ms = (int32_t)(now_ms - client->lap_start_ms);
@@ -1022,39 +1094,22 @@ static void simhub_post_process(gt7_client_t *client, gt7_state_t *state, uint32
     uint16_t flags = GT7_FLAG_IN_RACE | GT7_FLAG_IN_GEAR | GT7_FLAG_HAS_TURBO | GT7_FLAG_LIGHTS_ACTIVE | GT7_FLAG_LOW_BEAM;
     if (state->engine_rpm >= (float)state->rpm_warning) {
         flags |= GT7_FLAG_REV_BLINK;
+    } else {
+        state->flags &= (uint16_t)~GT7_FLAG_REV_BLINK;
     }
     state->flags |= flags;
 
-    /* Derive aerodynamic downforce, wheel rad/s, steering wheel rad, and hybrid/EV power on every frame */
-    float spd_norm = state->speed_kmh / 300.0f;
-    state->downforce_front_kg = 210.0f * spd_norm * spd_norm;
-    state->downforce_rear_kg  = 375.0f * spd_norm * spd_norm;
+    /* Derive chassis geometry defaults when game stream omits direct sensor values */
     state->wheel_rotation     = (state->steer_angle_fl_deg * 14.0f) * ((float)M_PI / 180.0f);
     if (state->wheel_base_m <= 0.5f) state->wheel_base_m = 2.72f;
     state->body_height = 56.0f - state->g_lon * 4.5f;
     if (state->water_temp <= 1.0f)   state->water_temp   = 88.0f;
     if (state->oil_temp <= 1.0f)     state->oil_temp     = 102.0f;
-    state->trans_oil_temp = state->oil_temp - 4.0f;
     if (state->oil_pressure <= 0.1f) state->oil_pressure = 4.5f + 2.0f * (state->engine_rpm / (float)state->rpm_limiter);
-    if (state->car_category[0] == '\0') strncpy(state->car_category, "SIM", sizeof(state->car_category) - 1);
+    if (state->car_category[0] == '\0') snprintf(state->car_category, sizeof(state->car_category), "SIM");
 
-    /* Ensure EV / Hybrid & Torque Vectoring gauges on Benz / BMW / Audi / Volvo / F1 / GT7 have live dynamic data every frame */
-    if (state->battery_soc_pct <= 0.1f) {
-        state->battery_soc_pct = (state->fuel_pct > 1.0f) ? state->fuel_pct : 78.0f;
-    }
-    if (fabsf(state->energy_recovery_kw) <= 0.01f) {
-        state->energy_recovery_kw = (state->throttle_pct * 4.2f) - (state->brake_pct * 2.6f);
-    }
-    state->energy_recovery_avail = true;
-    state->engine_torque_norm = (state->throttle_pct - state->brake_pct * 0.6f) / 100.0f;
-    {
-        float base_nm = (state->throttle_pct * 5.2f) - (state->brake_pct * 3.0f);
-        float yaw_bias = state->steer_angle_fl_deg / 32.0f;
-        state->torque_vector_nm[0] = base_nm * (0.38f - yaw_bias * 0.10f);
-        state->torque_vector_nm[1] = base_nm * (0.38f + yaw_bias * 0.10f);
-        state->torque_vector_nm[2] = base_nm * (0.62f - yaw_bias * 0.16f);
-        state->torque_vector_nm[3] = base_nm * (0.62f + yaw_bias * 0.16f);
-    }
+    /* Preserve real parsed power & torque when supplied by Forza / SimHub JSON; synthesize only if missing */
+    apply_aero_and_ev_synthesis(state, client->pkt_has_power, client->pkt_has_torque);
 
     for (int i = 0; i < 4; ++i) {
         if (state->surface_type[i] == 0) state->surface_type[i] = 'T';
@@ -1081,41 +1136,11 @@ static void simhub_post_process(gt7_client_t *client, gt7_state_t *state, uint32
         }
     }
 
-    /* Record 2D GPS Circuit coordinate if SimHub provides world X/Z */
-    if (!state->demo_mode && state->speed_kmh > 8.0f && (fabsf(state->pos_x) > 0.1f || fabsf(state->pos_z) > 0.1f)) {
-        float dx = client->has_sample_pos ? (state->pos_x - client->last_sample_x) : 999.0f;
-        float dz = client->has_sample_pos ? (state->pos_z - client->last_sample_z) : 999.0f;
-        float dist_sq = dx * dx + dz * dz;
-        if (!client->has_sample_pos || dist_sq >= 225.0f || (now_ms - client->last_track_sample_ms >= 400 && dist_sq >= 16.0f)) {
-            bool is_teleport = (client->has_sample_pos && dist_sq > 62500.0f);
-            int h = state->track_pt_head;
-            state->track_pts[h].x = state->pos_x;
-            state->track_pts[h].z = state->pos_z;
-            state->track_pts[h].speed_kmh = state->speed_kmh;
-            state->track_pts[h].pedal_state = (state->brake_pct > 20.0f) ? 2 : ((state->throttle_pct > 50.0f) ? 1 : 0);
-            state->track_pts[h].segment_break = is_teleport ? 1 : 0;
-            state->track_pt_head = (h + 1) % GT7_TRACK_PTS;
-            if (state->track_pt_count < GT7_TRACK_PTS) state->track_pt_count++;
-            if (!is_teleport) {
-                if (state->pos_x < state->track_min_x) state->track_min_x = state->pos_x;
-                if (state->pos_x > state->track_max_x) state->track_max_x = state->pos_x;
-                if (state->pos_z < state->track_min_z) state->track_min_z = state->pos_z;
-                if (state->pos_z > state->track_max_z) state->track_max_z = state->pos_z;
-            }
-            client->last_sample_x = state->pos_x;
-            client->last_sample_z = state->pos_z;
-            client->has_sample_pos = true;
-            client->last_track_sample_ms = now_ms;
-        }
-    }
-
-    state->trace_throttle[state->trace_head] = state->throttle_pct;
-    state->trace_brake[state->trace_head]    = state->brake_pct;
-    state->trace_speed[state->trace_head]    = state->speed_kmh;
-    state->trace_head = (state->trace_head + 1) % GT7_TRACE_LEN;
+    record_track_sample(client, state, now_ms, true);
+    push_pedal_speed_trace(state);
 }
 
-static void simhub_apply_kv(gt7_state_t *state, const char *key, const char *val) {
+static void simhub_apply_kv(gt7_client_t *client, gt7_state_t *state, const char *key, const char *val) {
     if (!key || !*key || !val || !*val) return;
     /* Strip SimHub namespace prefix if present (e.g. "DataCorePlugin.GameData.NewData.Rpms" -> "Rpms") */
     const char *dot = strrchr(key, '.');
@@ -1195,53 +1220,29 @@ static void simhub_apply_kv(gt7_state_t *state, const char *key, const char *val
     } else if (strcasecmp(key, "oil_pressure") == 0 || strcasecmp(key, "oil_press") == 0 || strcasecmp(key, "OilPressure") == 0) {
         state->oil_pressure = fval;
     } else if (strcasecmp(key, "tire_fl") == 0 || strcasecmp(key, "tyre_temp_fl") == 0 || strcasecmp(key, "TyreTemperatureFrontLeft") == 0 || strcasecmp(key, "TireTemperatureFrontLeft") == 0 || strcasecmp(key, "TireTempFrontLeft") == 0 || strcasecmp(key, "TireTempFl") == 0) {
-        state->tire_temp[0] = (fval > 135.0f) ? ((fval - 32.0f) * 5.0f / 9.0f) : fval;
+        apply_simhub_tire_temp(state, 0, fval);
     } else if (strcasecmp(key, "tire_fr") == 0 || strcasecmp(key, "tyre_temp_fr") == 0 || strcasecmp(key, "TyreTemperatureFrontRight") == 0 || strcasecmp(key, "TireTemperatureFrontRight") == 0 || strcasecmp(key, "TireTempFrontRight") == 0 || strcasecmp(key, "TireTempFr") == 0) {
-        state->tire_temp[1] = (fval > 135.0f) ? ((fval - 32.0f) * 5.0f / 9.0f) : fval;
+        apply_simhub_tire_temp(state, 1, fval);
     } else if (strcasecmp(key, "tire_rl") == 0 || strcasecmp(key, "tyre_temp_rl") == 0 || strcasecmp(key, "TyreTemperatureRearLeft") == 0 || strcasecmp(key, "TireTemperatureRearLeft") == 0 || strcasecmp(key, "TireTempRearLeft") == 0 || strcasecmp(key, "TireTempRl") == 0) {
-        state->tire_temp[2] = (fval > 135.0f) ? ((fval - 32.0f) * 5.0f / 9.0f) : fval;
+        apply_simhub_tire_temp(state, 2, fval);
     } else if (strcasecmp(key, "tire_rr") == 0 || strcasecmp(key, "tyre_temp_rr") == 0 || strcasecmp(key, "TyreTemperatureRearRight") == 0 || strcasecmp(key, "TireTemperatureRearRight") == 0 || strcasecmp(key, "TireTempRearRight") == 0 || strcasecmp(key, "TireTempRr") == 0) {
-        state->tire_temp[3] = (fval > 135.0f) ? ((fval - 32.0f) * 5.0f / 9.0f) : fval;
+        apply_simhub_tire_temp(state, 3, fval);
     } else if (strcasecmp(key, "slip_fl") == 0 || strcasecmp(key, "TyreSlipFrontLeft") == 0 || strcasecmp(key, "TireSlipFrontLeft") == 0 || strcasecmp(key, "TireSlipRatioFrontLeft") == 0 || strcasecmp(key, "TireCombinedSlipFrontLeft") == 0) {
-        float s = fabsf(fval);
-        if (strncasecmp(key, "TireSlipRatio", 13) == 0 || strncasecmp(key, "TireCombinedSlip", 16) == 0) {
-            s = (s <= 1.0f) ? (s * 0.10f) : (0.12f + (s - 1.0f) * 0.60f);
-        } else if (s > 1.5f) {
-            s /= 100.0f;
-        }
-        state->tire_slip_ratio[0] = (s > 1.0f) ? 1.0f : s;
+        apply_simhub_wheel_slip(state, 0, key, fval);
     } else if (strcasecmp(key, "slip_fr") == 0 || strcasecmp(key, "TyreSlipFrontRight") == 0 || strcasecmp(key, "TireSlipFrontRight") == 0 || strcasecmp(key, "TireSlipRatioFrontRight") == 0 || strcasecmp(key, "TireCombinedSlipFrontRight") == 0) {
-        float s = fabsf(fval);
-        if (strncasecmp(key, "TireSlipRatio", 13) == 0 || strncasecmp(key, "TireCombinedSlip", 16) == 0) {
-            s = (s <= 1.0f) ? (s * 0.10f) : (0.12f + (s - 1.0f) * 0.60f);
-        } else if (s > 1.5f) {
-            s /= 100.0f;
-        }
-        state->tire_slip_ratio[1] = (s > 1.0f) ? 1.0f : s;
+        apply_simhub_wheel_slip(state, 1, key, fval);
     } else if (strcasecmp(key, "slip_rl") == 0 || strcasecmp(key, "TyreSlipRearLeft") == 0 || strcasecmp(key, "TireSlipRearLeft") == 0 || strcasecmp(key, "TireSlipRatioRearLeft") == 0 || strcasecmp(key, "TireCombinedSlipRearLeft") == 0) {
-        float s = fabsf(fval);
-        if (strncasecmp(key, "TireSlipRatio", 13) == 0 || strncasecmp(key, "TireCombinedSlip", 16) == 0) {
-            s = (s <= 1.0f) ? (s * 0.10f) : (0.12f + (s - 1.0f) * 0.60f);
-        } else if (s > 1.5f) {
-            s /= 100.0f;
-        }
-        state->tire_slip_ratio[2] = (s > 1.0f) ? 1.0f : s;
+        apply_simhub_wheel_slip(state, 2, key, fval);
     } else if (strcasecmp(key, "slip_rr") == 0 || strcasecmp(key, "TyreSlipRearRight") == 0 || strcasecmp(key, "TireSlipRearRight") == 0 || strcasecmp(key, "TireSlipRatioRearRight") == 0 || strcasecmp(key, "TireCombinedSlipRearRight") == 0) {
-        float s = fabsf(fval);
-        if (strncasecmp(key, "TireSlipRatio", 13) == 0 || strncasecmp(key, "TireCombinedSlip", 16) == 0) {
-            s = (s <= 1.0f) ? (s * 0.10f) : (0.12f + (s - 1.0f) * 0.60f);
-        } else if (s > 1.5f) {
-            s /= 100.0f;
-        }
-        state->tire_slip_ratio[3] = (s > 1.0f) ? 1.0f : s;
+        apply_simhub_wheel_slip(state, 3, key, fval);
     } else if (strcasecmp(key, "susp_fl") == 0 || strcasecmp(key, "SuspensionFrontLeft") == 0 || strcasecmp(key, "NormalizedSuspensionTravelFrontLeft") == 0 || strcasecmp(key, "SuspensionTravelMetersFrontLeft") == 0) {
-        state->susp_height[0] = (fval >= 0.0f && fval <= 1.2f) ? (25.0f + fval * 65.0f) : fval;
+        apply_simhub_wheel_susp(state, 0, fval);
     } else if (strcasecmp(key, "susp_fr") == 0 || strcasecmp(key, "SuspensionFrontRight") == 0 || strcasecmp(key, "NormalizedSuspensionTravelFrontRight") == 0 || strcasecmp(key, "SuspensionTravelMetersFrontRight") == 0) {
-        state->susp_height[1] = (fval >= 0.0f && fval <= 1.2f) ? (25.0f + fval * 65.0f) : fval;
+        apply_simhub_wheel_susp(state, 1, fval);
     } else if (strcasecmp(key, "susp_rl") == 0 || strcasecmp(key, "SuspensionRearLeft") == 0 || strcasecmp(key, "NormalizedSuspensionTravelRearLeft") == 0 || strcasecmp(key, "SuspensionTravelMetersRearLeft") == 0) {
-        state->susp_height[2] = (fval >= 0.0f && fval <= 1.2f) ? (25.0f + fval * 65.0f) : fval;
+        apply_simhub_wheel_susp(state, 2, fval);
     } else if (strcasecmp(key, "susp_rr") == 0 || strcasecmp(key, "SuspensionRearRight") == 0 || strcasecmp(key, "NormalizedSuspensionTravelRearRight") == 0 || strcasecmp(key, "SuspensionTravelMetersRearRight") == 0) {
-        state->susp_height[3] = (fval >= 0.0f && fval <= 1.2f) ? (25.0f + fval * 65.0f) : fval;
+        apply_simhub_wheel_susp(state, 3, fval);
     } else if (strcasecmp(key, "wheel_spd_fl") == 0 || strcasecmp(key, "WheelRotationSpeedFrontLeft") == 0) {
         state->wheel_angular_speed[0] = fval;
     } else if (strcasecmp(key, "wheel_spd_fr") == 0 || strcasecmp(key, "WheelRotationSpeedFrontRight") == 0) {
@@ -1304,14 +1305,13 @@ static void simhub_apply_kv(gt7_state_t *state, const char *key, const char *val
     } else if (strcasecmp(key, "energy_kw") == 0 || strcasecmp(key, "ers_power") == 0 || strcasecmp(key, "ERSPower") == 0 || strcasecmp(key, "ERSRecovery") == 0 || strcasecmp(key, "RegenKw") == 0) {
         state->energy_recovery_kw = fval;
         state->energy_recovery_avail = true;
+        if (client) client->pkt_has_power = true;
     } else if (strcasecmp(key, "soc") == 0 || strcasecmp(key, "ers_pct") == 0 || strcasecmp(key, "ERSPercent") == 0 || strcasecmp(key, "BatterySOC") == 0) {
         state->battery_soc_pct = fval;
     } else if (strcasecmp(key, "track") == 0 || strcasecmp(key, "TrackName") == 0) {
-        strncpy(state->circuit_name, val, sizeof(state->circuit_name) - 1);
-        state->circuit_name[sizeof(state->circuit_name) - 1] = '\0';
+        snprintf(state->circuit_name, sizeof(state->circuit_name), "%s", val);
     } else if (strcasecmp(key, "category") == 0 || strcasecmp(key, "CarClass") == 0) {
-        strncpy(state->car_category, val, 4);
-        state->car_category[4] = '\0';
+        snprintf(state->car_category, sizeof(state->car_category), "%.4s", val);
     } else if (strcasecmp(key, "tcs") == 0 || strcasecmp(key, "TCLevel") == 0) {
         state->gt7_tcs_level = atoi(val);
     } else if (strcasecmp(key, "bb") == 0 || strcasecmp(key, "BrakeBias") == 0) {
@@ -1335,27 +1335,28 @@ static void simhub_apply_kv(gt7_state_t *state, const char *key, const char *val
         else state->flags &= (uint16_t)~GT7_FLAG_ASM_ACTIVE;
     } else if (strcasecmp(key, "CarModel") == 0 || strcasecmp(key, "CarName") == 0) {
         if (state->car_category[0] == '\0' || strcmp(state->car_category, "SIM") == 0) {
-            strncpy(state->car_category, val, sizeof(state->car_category) - 1);
-            state->car_category[sizeof(state->car_category) - 1] = '\0';
+            snprintf(state->car_category, sizeof(state->car_category), "%s", val);
         }
     } else if (strcasecmp(key, "torque") == 0 || strcasecmp(key, "Torque") == 0 || strcasecmp(key, "EngineTorque") == 0) {
-        state->engine_torque_norm = (fval > 1200.0f) ? 1.0f : (fabsf(fval) / 800.0f);
-        state->torque_vector_nm[0] = fval * 0.20f;
-        state->torque_vector_nm[1] = fval * 0.20f;
-        state->torque_vector_nm[2] = fval * 0.30f;
-        state->torque_vector_nm[3] = fval * 0.30f;
+        distribute_drivetrain_torque_nm(state, fval, 2);
+        if (client) client->pkt_has_torque = true;
     } else if (strcasecmp(key, "power") == 0 || strcasecmp(key, "Power") == 0 || strcasecmp(key, "EnginePower") == 0) {
         if (fval > 1000.0f) fval /= 1000.0f; /* Convert Watts to kW */
         state->energy_recovery_kw = fval;
         state->energy_recovery_avail = true;
+        if (client) client->pkt_has_power = true;
     }
 }
 
 bool simhub_parse_packet(gt7_client_t *client, gt7_state_t *state, const uint8_t *raw, size_t len, uint32_t now_ms) {
     if (!raw || len < 8) return false;
 
-    /* Reset suggested_gear before parsing so simhub_post_process computes a fresh suggestion if none is in packet */
+    /* Reset per-packet flags so simhub_post_process only synthesizes missing metrics */
     state->suggested_gear = 0;
+    if (client) {
+        client->pkt_has_torque = false;
+        client->pkt_has_power  = false;
+    }
 
     /* 1. Check for SimHub JSON ("{...}") or Key-Value ("SIMHUB:..." / "rpm=...;speed=...") */
     size_t i = 0;
@@ -1368,6 +1369,7 @@ bool simhub_parse_packet(gt7_client_t *client, gt7_state_t *state, const uint8_t
         buf[copy_len] = '\0';
 
         state->energy_recovery_kw = 0.0f;
+        state->flags &= (uint16_t)~GT7_FLAG_PAUSED;
         for (int w = 0; w < 4; ++w) {
             state->wheel_angular_speed[w] = 0.0f;
             state->susp_height[w] = 0.0f;
@@ -1422,14 +1424,14 @@ bool simhub_parse_packet(gt7_client_t *client, gt7_state_t *state, const uint8_t
             }
 
             if (key[0] && val[0]) {
-                simhub_apply_kv(state, key, val);
+                simhub_apply_kv(client, state, key, val);
                 parsed_fields++;
             }
         }
 
         if (parsed_fields >= 2) {
             state->rx_packet_len = len;
-            strncpy(state->simhub_format, "SIMHUB JSON", sizeof(state->simhub_format) - 1);
+            snprintf(state->simhub_format, sizeof(state->simhub_format), "SIMHUB JSON");
             simhub_post_process(client, state, now_ms);
             return true;
         }
@@ -1570,34 +1572,19 @@ bool simhub_parse_packet(gt7_client_t *client, gt7_state_t *state, const uint8_t
                 state->speed_ms  = fabsf(read_f32_le(raw, dash_off + 0x0C));
                 state->speed_kmh = state->speed_ms * 3.6f;
                 state->speed_mph = state->speed_ms * 2.236936f;
+                state->steer_angle_fl_deg = ((float)((int8_t)raw[dash_off + 0x4C]) / 127.0f) * 32.0f;
+                state->steer_angle_fr_deg = state->steer_angle_fl_deg;
+
                 float fz_power_w   = read_f32_le(raw, dash_off + 0x10);
                 float fz_torque_nm = read_f32_le(raw, dash_off + 0x14);
                 if (isfinite(fz_power_w)) {
                     state->energy_recovery_kw = fz_power_w / 1000.0f;
+                    if (client) client->pkt_has_power = true;
                 }
                 if (isfinite(fz_torque_nm)) {
-                    float t_mag = fabsf(fz_torque_nm);
-                    state->engine_torque_norm = (t_mag > 1200.0f) ? 1.0f : (t_mag / 800.0f);
-                    float yaw_steer_bias = state->steer_angle_fl_deg / 35.0f;
-                    if (fz_drive == 2) {
-                        /* AWD: 40% front / 60% rear nominal */
-                        state->torque_vector_nm[0] = fz_torque_nm * 0.40f * 0.50f * (1.0f - yaw_steer_bias * 0.20f);
-                        state->torque_vector_nm[1] = fz_torque_nm * 0.40f * 0.50f * (1.0f + yaw_steer_bias * 0.20f);
-                        state->torque_vector_nm[2] = fz_torque_nm * 0.60f * 0.50f * (1.0f - yaw_steer_bias * 0.25f);
-                        state->torque_vector_nm[3] = fz_torque_nm * 0.60f * 0.50f * (1.0f + yaw_steer_bias * 0.25f);
-                    } else if (fz_drive == 0) {
-                        /* FWD: 100% front */
-                        state->torque_vector_nm[0] = fz_torque_nm * 0.50f * (1.0f - yaw_steer_bias * 0.20f);
-                        state->torque_vector_nm[1] = fz_torque_nm * 0.50f * (1.0f + yaw_steer_bias * 0.20f);
-                        state->torque_vector_nm[2] = 0.0f;
-                        state->torque_vector_nm[3] = 0.0f;
-                    } else {
-                        /* RWD: 100% rear */
-                        state->torque_vector_nm[0] = 0.0f;
-                        state->torque_vector_nm[1] = 0.0f;
-                        state->torque_vector_nm[2] = fz_torque_nm * 0.50f * (1.0f - yaw_steer_bias * 0.25f);
-                        state->torque_vector_nm[3] = fz_torque_nm * 0.50f * (1.0f + yaw_steer_bias * 0.25f);
-                    }
+                    int dt_mode = (fz_drive == 0) ? 0 : ((fz_drive == 1) ? 1 : 2);
+                    distribute_drivetrain_torque_nm(state, fz_torque_nm, dt_mode);
+                    if (client) client->pkt_has_torque = true;
                 }
 
                 /* Forza TireTemp[0..3] (dash_off + 0x18..0x24) is ALWAYS in Fahrenheit (°F) -> convert to Celsius (°C) */
@@ -1666,9 +1653,6 @@ bool simhub_parse_packet(gt7_client_t *client, gt7_state_t *state, const uint8_t
                     state->flags &= (uint16_t)~GT7_FLAG_PAUSED;
                 }
                 (void)idle_rpm;
-
-                state->steer_angle_fl_deg = ((float)((int8_t)raw[dash_off + 0x4C]) / 127.0f) * 32.0f;
-                state->steer_angle_fr_deg = state->steer_angle_fl_deg;
             } else {
                 state->speed_ms = sqrtf(state->vel_x * state->vel_x + state->vel_z * state->vel_z);
                 state->speed_kmh = state->speed_ms * 3.6f;
@@ -1883,9 +1867,16 @@ static void poll_udp_socket(int fd, gt7_client_t *client, gt7_state_t *state, ui
             client->reconnecting_direct = false;
             char detected_ip[INET_ADDRSTRLEN];
             if (inet_ntop(AF_INET, &sender.sin_addr, detected_ip, sizeof(detected_ip))) {
-                snprintf(client->ps5_ip, sizeof(client->ps5_ip), "%s", detected_ip);
-                snprintf(client->last_known_ps5_ip, sizeof(client->last_known_ps5_ip), "%s", detected_ip);
-                client->last_ps5_seen_ms = now_ms;
+                if (state->is_simhub) {
+                    /* Record PC SimHub sender separately so manually locked PS5 IP is never overwritten */
+                    snprintf(client->simhub_ip, sizeof(client->simhub_ip), "%s", detected_ip);
+                } else {
+                    client->last_ps5_seen_ms = now_ms ? now_ms : 1;
+                    if (client->auto_detect) {
+                        snprintf(client->ps5_ip, sizeof(client->ps5_ip), "%s", detected_ip);
+                        snprintf(client->last_known_ps5_ip, sizeof(client->last_known_ps5_ip), "%s", detected_ip);
+                    }
+                }
             }
         }
     }
@@ -1894,15 +1885,15 @@ static void poll_udp_socket(int fd, gt7_client_t *client, gt7_state_t *state, ui
 void gt7_update(gt7_client_t *client, gt7_state_t *state, uint32_t now_ms) {
     uint32_t hb_interval = 1000;
     if (!state->connected) {
-        if (client->reconnecting_direct) {
+        if (client->reconnecting_direct || !client->auto_detect) {
             hb_interval = 800; /* Targeted gentle unicast to PS5 IP */
         } else if (client->auto_detect) {
-            hb_interval = 400; /* Gentle step-by-step sweep (1 host per pulse) */
+            hb_interval = 250; /* Balanced discovery: 4 hosts/tick = ~16 hosts/sec */
         }
     }
-    if (now_ms - client->last_heartbeat_ms >= hb_interval) {
+    if (client->last_heartbeat_ms == 0 || (now_ms - client->last_heartbeat_ms >= hb_interval)) {
         gt7_send_heartbeat(client, state->connected, now_ms);
-        client->last_heartbeat_ms = now_ms;
+        client->last_heartbeat_ms = now_ms ? now_ms : 1;
         if (!state->connected) {
             client->hb_fail_count++;
         }
@@ -1915,13 +1906,27 @@ void gt7_update(gt7_client_t *client, gt7_state_t *state, uint32_t now_ms) {
 
     if (state->connected && (now_ms - state->last_rx_ms > 2500)) {
         state->connected = false;
-        client->reconnecting_direct = (client->last_known_ps5_ip[0] != '\0' && strcasecmp(client->last_known_ps5_ip, "AUTO") != 0);
+        client->reconnecting_direct = (client->heartbeat_mode != GT7_HEARTBEAT_SIMHUB &&
+                                       client->last_known_ps5_ip[0] != '\0' &&
+                                       strcasecmp(client->last_known_ps5_ip, "AUTO") != 0);
     }
 
-    /* Automatic Socket Recovery: If no packets for > 8s and socket wasn't recycled in last 12s, refresh UDP socket */
-    if (!state->connected && (now_ms - state->last_rx_ms > 8000) && (now_ms - client->last_socket_recycle_ms > 12000)) {
-        gt7_recycle_socket(client);
-        client->last_socket_recycle_ms = now_ms;
+    /* Targeted Socket Auto-Healing:
+       Only recycle GT7 UDP socket if not in pure PC SimHub mode, disconnected, AND either an async
+       socket error (e.g. ICMP Port Unreachable) occurred or an active PS5 session went silent > 8s. */
+    if (client->heartbeat_mode != GT7_HEARTBEAT_SIMHUB && !state->connected && client->sock_fd >= 0) {
+        int sock_err = 0;
+        socklen_t err_len = sizeof(sock_err);
+        if (getsockopt(client->sock_fd, SOL_SOCKET, SO_ERROR, &sock_err, &err_len) < 0) {
+            sock_err = 0;
+        }
+        bool had_prior_ps5_session = (client->last_ps5_seen_ms > 0 && now_ms >= state->last_rx_ms &&
+                                      (now_ms - state->last_rx_ms > 8000));
+        if ((sock_err != 0 || had_prior_ps5_session) &&
+            (client->last_socket_recycle_ms == 0 || now_ms - client->last_socket_recycle_ms > 15000)) {
+            gt7_recycle_socket(client);
+            client->last_socket_recycle_ms = now_ms ? now_ms : 1;
+        }
     }
 }
 

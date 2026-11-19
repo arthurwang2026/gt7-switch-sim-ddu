@@ -8,77 +8,38 @@ REPO_NAME="gt7-switch-sim-ddu"
 echo "=== 檢查 GitHub 公開儲存庫: $REPO_NAME ==="
 gh repo create "$REPO_NAME" --public --source=. --remote=origin --push --description "PS5 Gran Turismo 7 Sim Racing DDU for Nintendo Switch (Atmosphère Homebrew .nro) with 8 motorsport modes & luxury EV cockpits" || true
 
-TAG_NAME="v1.10.30.1350"
-TITLE="GT7 Switch Sim-DDU Pro _aw_1.10.30.1350 (Authentic Full-Screen & Modern Vector Typography Overhaul for Benz, BMW, Audi, Volvo)"
+APP_VER=$(sed -n 's/^#define GT7_APP_VERSION "_aw_\([^"]*\)"/\1/p' source/gt7_telemetry.h)
+TAG_NAME="v${APP_VER}"
+TITLE="GT7 Switch Sim-DDU Pro _aw_${APP_VER} (Wi-Fi Heartbeat Resilience, Forza/SimHub Telemetry Accuracy & Modular EV Cockpits)"
 
 NOTES=$(cat << 'EOF'
-## 🏁 GT7 Switch Sim-DDU Pro _aw_1.10.30.1350
+## 🏁 GT7 Switch Sim-DDU Pro _aw_1.11.19.1305
 
-### 🌟 豪華旗艦電車儀表 100% 全滿版與現代原廠向量字體極致重構 (Authentic Full-Screen & OEM Vector Typography Overhaul)
+### 🌟 本次雙階段優化與修復重點 (Optimization, Reliability & Telemetry Release)
 
-針對使用者回饋與最新 Mercedes-Benz MBUX EQ、BMW i-Curved M (OS 8.5/9)、Audi Sport RS Virtual Cockpit、Volvo EX90 Google Built-in 實車儀表照片，進行全面視覺重構與細節對齊：
+1. **Wi-Fi 斷線修復、手動鎖定保護與離線子網偵測 (Network & Heartbeat Resilience)**：
+   - **鎖定 IP 防覆寫**：分離 `simhub_ip` 與 `ps5_ip` 追蹤欄位，確保手動 `LOCK MANUAL IP` 模式下的 PS5 IP 絕不被連入的 PC SimHub 或雜散 UDP 封包覆蓋，且僅於狀態實際改變時寫入 `config.ini` 減少 SD 卡擦寫。
+   - **Switch / POSIX 離線子網自動識別**：Switch 端透過 `nifmGetCurrentIpAddress()`、桌面端透過 `getifaddrs()` 精準取得本機 IP 與網段前綴（無須外網連線即可完成區域網偵測），並於探索輪詢時自動跳過本機 IP。
+   - **智慧心跳包重連與 Socket 自動修復**：啟動立即發送首包心跳（`last_bcast_ms == 0`）、平衡 `/24` 掃描（每 250ms 4 主機 + 限流廣播）、並以 `SO_ERROR` 與 `last_ps5_seen_ms > 0` 雙重保護避免空轉或 SimHub 模式誤觸 Socket 重建。
 
-1. **全新原廠現代幾何向量字型引擎 (Modern Luxury Automotive Vector Typography)**：
-   - 徹底捨棄復古 7 段 LED 數位傾斜字體，自主實作 `draw_modern_char` 與 `draw_modern_number_centered` 原廠級無襯線向量字型。
-   - 筆畫粗細均勻（6~8px）、幾何圓角與倒角過渡平滑，完美還原各車廠最新數位儀表之高品質質感。
+2. **Forza Horizon 6 / PC SimHub 遙測精準修復 (Telemetry Accuracy & DRY Cleanup)**：
+   - **保留真實扭力與馬力輸出**：新增 `pkt_has_torque` / `pkt_has_power` 標記，確保 Forza RWD / FWD / AWD 真實前後輪扭力分配與 kW 功率不被後續 Fallback 公式覆蓋；並將轉向角解析提前至扭力分配之前，消除 1 幀轉向延遲。
+   - **SimHub JSON 狀態精準同步**：接收 JSON 遙測封包時正確解除 `GT7_FLAG_PAUSED` 狀態，並在頂部狀態列正確顯示獨立的 `simhub_ip` 位址。
 
-2. **Mercedes-Benz MBUX EQ (雙 492px 巨型類比圓錶 + 電幻地平線浪湧)**：
-   - 雙圓直徑擴大至 492px，幾近貼合螢幕垂直高度，內部配置 72 道星芒放射線與高精度刻度。
-   - 中間全面鋪設平滑漸層電幻地平線藍光（Electric Blue Horizon Wave）。
-   - 頂部現代向量時速與 ADAS 駕駛輔助陣列（車距雷達、車道維持、雙手方向盤、限速 50）。
-   - "From Reset" 航程卡精緻半透明磨砂深藍玻璃，呈現油量、均速、單圈時間、里程與綠色 ECO 綠葉圖示。
-   - 右錶外側配置真實 MBUX 直列式 R/N/D 檔位柱、大型白色 P/D 檔位與 `[ C ]` / `[ S ]` 動態駕駛模式膠囊。
-   - 下方配置 3 人座安全帶就座圖形卡與 4MATIC AWD 四驅扭力比、四輪胎溫及路面接地徽章。
+3. **SDL 效能批次渲染、模組化架構與實車即時數據化 (Renderer & EV Cockpit Polish)**：
+   - **SDL2 渲染批次化 (`SDL_RenderFillRects`)**：最佳化 `hud_draw_text`（直行 Run-length 合併 + 批次繪製）與 BMW Curved Crystal Glass Chevron 光條渲染，顯著降低 Switch GPU/CPU Draw Call；時鐘函式每秒僅查詢 1 次 `localtime()` 快取。
+   - **模組化架構重構**：拆出 `source/hud_internal.h` 與 `source/hud_ev_cockpits.c`（Luxury EV 四大車廠儀表獨立成檔），維持純淨零重複與 `#000000` OLED 真黑基準。
+   - **消除靜態佔位數值**：Benz MBUX EQ、BMW iDrive、Audi e-tron RS、Volvo EX90全面顯示即時冷卻液溫度 (`°C`/`°F`)、動態 `(P)` 手煞車/駐車狀態、即時賽道名稱與 `GT7_FLAG_IN_PIT` 動態進站限速標誌。
+   - **IP 觸控視窗對齊與全協定開放**：統一 `IP_MODAL_*` 佈局座標修正鍵盤 2px 觸控偏移，並於觸控視窗完整開放全部 6 種 `gt7_heartbeat_mode_t` 模式按鈕 (`AUTO`, `PKT C`, `PKT ~`, `PC SIMHUB`, `PKT A`, `PKT B`)。
 
-3. **BMW i-Curved M Display (100% 全螢幕 3D 街區導航地圖 + 對稱式幾何雙箭頭)**：
-   - 導航地圖全面擴展至 1280px 全螢幕邊緣（消除兩側黑邊與突兀黑框），支援透視路網、交錯市區大道與路徑航點。
-   - 左右雙箭頭覆蓋半透明深藍結晶磨砂背板，左箭頭鑲嵌現代向量時速與 km/h 標籤；右箭頭鑲嵌現代大字檔位（P / D / R）、READY 0、即時功率（+481 kW）與傾斜 ADAPTIVE 駕駛模式。
-   - 底部完整對齊原廠狀態列：總里程 465 km、時間 10:49、歐規圓形紅框速限 `(50)`、俯視車輛底盤圖標、車外溫度 `+ 19.0 °C` 與高壓電池電量條。
-
-4. **Audi Sport RS Virtual Cockpit (RS 階梯跑道轉速表 + 雙圓形 Power/Torque 儀表)**：
-   - 階梯跑道式轉速表（Runway Hockey-stick）尺寸大幅擴展，精準繪製斜坡 READY 1 2 3 與水平 4 5 6 7 8 轉速刻度及 7-8k 紅線區。
-   - 彎角核心配置現代巨型向量時速，下方配置 RS 簽名檔位（R AUTO / D AUTO / S 6 DYNAMIC）。
-   - 右側雙獨立圓形儀表：Power % 與 Torque % 具備外圈青綠飾環、內圈刻度與底部紅色指針，下方配置橫向分段 `MIN BOOST MAX` 增壓條與 RS QUATTRO e-tron AWD 性能卡。
-   - 左側完整配置日期時間（`10:43 AM Wednesday 11.3.2026`）、機油溫度條與專屬 RS 四輪 TPMS 胎面卡。
-
-5. **Volvo EX90 / Polestar (Google Built-in 100% 邊緣到邊緣全景導航 + 雙弧儀表)**：
-   - 3D Google Maps 透視地圖橫跨 0 至 1280px，標註真實街道名稱（Granville St、Oak St、W 49th Ave、W 57th Ave）、青藍色 "Devonshire park" 公園多邊形與 Google 識別商標。
-   - 左右緊貼螢幕外緣配置外拱形 0~200 時速弧與 Power/Charge 動能弧。
-   - 雙懸浮圓角磨砂玻璃艙：左艙配置白底黑字方框速限 `[20]` 與現代向量時速；右艙配置綠色 READY、大型檔位 D、直列 R/N/D/-B+ 檔位柱與 power/charge 刻度。
-   - 底部配置雙動態續航條（電池 264 km、燃油 356 km）與 Volvo Trip 遙測摘要。
+4. **自動化回歸測試驗證 (`make test`)**：
+   - 新增 `tests/test_telemetry.c`（5 項 UDP 迴路與封包解析測試）與 `tests/test_hud_touch.c`（IP 觸控矩陣、6 協定切換與 8 大主題全離線渲染測試），通過 AddressSanitizer / UndefinedBehaviorSanitizer 與零編譯警告驗證。
 
 ---
 
-### 🇹🇼 繁體中文
-- **旗艦電車儀表 100% 全滿版與現代原廠向量字體重構 (v1.10.30.1350)**：
-  - 4 款旗艦電車儀表全數消除兩側黑邊，BMW 與 Volvo 具備滿版 1280px 3D 導航透視地圖。
-  - 導入專屬現代原廠無襯線向量數字（draw_modern_char），終結復古 LED 粗糙感。
-  - Benz MBUX、BMW iDrive、Audi Virtual Cockpit、Volvo EX90 之檔位、功率、胎面、四驅分配完全契合實車邏輯。
-  - 純黑色 OLED (`#000000`) 零文字重疊與全滿版沉浸式渲染。
-
----
-
-### 🇬🇧 English
-- **Authentic Full-Screen & Modern Vector Typography Overhaul for Benz, BMW, Audi, Volvo (v1.10.30.1350)**:
-  - 100% full-bleed canvas utilization across all 4 luxury EV cockpits: edge-to-edge 1280px 3D navigation maps for BMW and Volvo, enlarged 492px dials with horizon glow for Benz, and expanded runway with dual circular pods for Audi.
-  - Custom OEM modern automotive vector typography replacing 7-segment digital font with clean, proportional luxury aesthetics.
-  - Authentic transmission selectors, live hybrid recovery/power kW, AWD torque splits, and surface contact badges (`[T]`, `[C]`, `[D]`, `[G]`, `[S]`).
-
----
-
-### 🇯🇵 日本語
-- **Benz、BMW、Audi、Volvoの全画面100%表示と最新OEMベクターフォント刷新 (v1.10.30.1350)**:
-  - BMWおよびVolvoに横幅1280pxの全画面3Dナビゲーションマップを実装し、余白ブラックアウトを完全解消。
-  - レトロな7セグメントLEDを廃止し、最新の高級車専用モダンベクターフォントを新設。
-  - Benz MBUXの大径492pxメーター、Audi SportのRS滑走路タコメーター＆Power/Torque2連ポッド、VolvoのGoogle Built-inフロートガラスポッドを実車に忠実に再現。
-
----
-
-### 🇩🇪 Deutsch
-- **Authentische Vollbild- & moderne Vektor-Typografie-Überarbeitung für Benz, BMW, Audi, Volvo (v1.10.30.1350)**:
-  - Vollständige 100% Bildschirmausnutzung (1280px) für BMW i-Curved und Volvo EX90 mit randlosem 3D-Kartennetzwerk.
-  - Elegante moderne OEM-Vektor-Typografie anstelle veralteter 7-Segment-LED-Ziffern.
-  - Präzise Abbildung der echten Getriebewahlhebel, Allrad-Drehmomentverteilung (4MATIC, xDrive, Quattro) und 4-Rad-TPMS-Reifenoberflächen.
+### 📦 安裝方式 / Installation
+- 下載最新 [`gt7_switch_hud.nro`](https://github.com/arthurwang2026/gt7-switch-sim-ddu/releases/latest/download/gt7_switch_hud.nro) 並覆蓋 Switch SD 卡之 `/switch/gt7_hud/gt7_switch_hud.nro`。
+- 若遇到無線路由器高頻 UDP 斷線，建議點選底部 `IP: AUTO` -> 輸入 PS5 區網 IP -> 點選 `LOCK MANUAL IP`。
 EOF
 )
 
